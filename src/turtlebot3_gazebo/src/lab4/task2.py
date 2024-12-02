@@ -1,4 +1,3 @@
-
 #!/usr/bin/env python3
 
 
@@ -18,6 +17,7 @@ import rclpy
 from rclpy.node import Node
 from nav_msgs.msg import Path
 from std_msgs.msg import Header
+import heapq
 
 
 class Queue():
@@ -69,7 +69,7 @@ class Queue():
 
 class Map():
     def __init__(self, map_name):
-        self.map_im, self.map_df, self.limits = self.__open_map(map_name)
+        self.map_im, self.map_df, self.limits,self.old_limits = self.__open_map(map_name)
         self.image_array = self.__get_obstacle_map(self.map_im, self.map_df)
 
     def __repr__(self):
@@ -81,14 +81,15 @@ class Map():
     def __open_map(self,map_name):
         # Open the YAML file which contains the map name and other
         # configuration parameters
-        map_name = 'src/task_7/maps/' + map_name  # Update with the path to your map.yaml
+        map_name = 'src/turtlebot3_gazebo/maps/' + map_name  # Update with the path to your map.yaml
 
         f = open( map_name + '.yaml', 'r')
         map_df = pd.json_normalize(yaml.safe_load(f))
         # Open the map image
         map_name = map_df.image[0]
-        map_name = 'src/task_7/maps/' + map_name
+        map_name = 'src/turtlebot3_gazebo/maps/' + map_name
         im = Image.open(map_name)
+        im_width,im_height = im.size
         size = 200, 200
         im.thumbnail(size)
         im = ImageOps.grayscale(im)
@@ -98,10 +99,15 @@ class Map():
         xmax = map_df.origin[0][0] + im.size[0] * map_df.resolution[0]
         ymin = map_df.origin[0][1]
         ymax = map_df.origin[0][1] + im.size[1] * map_df.resolution[0]
+        xmin_old = map_df.origin[0][0]
+        xmax_old = map_df.origin[0][0] + im_width * map_df.resolution[0]
+        ymin_old = map_df.origin[0][1]
+        ymax_old = map_df.origin[0][1] + im_height * map_df.resolution[0]
         print(im.size)
         print(xmin,xmax,ymin,ymax)
+        print(xmin_old,xmax_old,ymin_old,ymax_old)
 
-        return im, map_df, [xmin,xmax,ymin,ymax]
+        return im, map_df, [xmin,xmax,ymin,ymax],[xmin_old,xmax_old,ymin_old,ymax_old]
 
     def __get_obstacle_map(self,map_im, map_df):
         img_array = np.reshape(list(self.map_im.getdata()),(self.map_im.size[1],self.map_im.size[0]))
@@ -287,76 +293,10 @@ class Tree():
         self.root = False
         self.end = True
 
-
-    def __init__(self, in_tree):
-        self.in_tree = in_tree
-        self.q = Queue()
-        self.dist = {name: np.Inf for name, node in in_tree.g.items()}
-        self.h = {name: 0 for name, node in in_tree.g.items()}
-        for name, node in in_tree.g.items():
-            start = tuple(map(int, name.split(',')))
-            end = tuple(map(int, self.in_tree.end.split(',')))
-            self.h[name] = np.sqrt((end[0] - start[0])**2 + (end[1] - start[1])**2)
-        # Via dictionary to keep track of the path
-        self.via = {name: 0 for name, node in in_tree.g.items()}
-
-        # Push all nodes into the queue (following the original structure)
-        for __, node in in_tree.g.items():
-            self.q.push(node)
-
-    def __get_f_score(self, node):
-        # Calculate f-score as the sum of g (distance from start) and h (heuristic)
-        return self.dist[node.name] + self.h[node.name]
-
-    def solve(self, sn, en):
-        # Set the start node distance to 0
-        self.dist[sn.name] = 0
-        self.q.push(sn)
-        # Process until the queue is empty
-        while len(self.q) > 0:
-            # Sort the queue by f-score to simulate priority ordering
-            # u = min(self.q.queue, key=lambda node: self.__get_f_score(node))
-            # self.q.queue.remove(u)
-            # Sort the queue by f-score to simulate priority ordering
-            sorted_nodes = sorted(list(self.q.queue), key=lambda node: self.__get_f_score(node))
-            u = sorted_nodes[0]
-            self.q.queue.remove(u)
-            # Check if the end node is reached
-            if u.name == en.name:
-                break
-            # Iterate through each child of the current node
-            for i in range(len(u.children)):
-                c = u.children[i]
-                w = u.weight[i]
-                new_dist = self.dist[u.name] + w
-                # Update distance and path if a shorter path is found
-                if new_dist < self.dist[c.name]:
-                    self.dist[c.name] = new_dist
-                    self.via[c.name] = u.name
-                    # Only re-add the updated node to the queue
-                    if c not in self.q.queue:
-                        self.q.push(c)
-        # print(self.q)
-
-    def reconstruct_path(self, sn, en):
-        start_key = sn.name
-        end_key = en.name
-        dist = self.dist[end_key]
-        u = end_key
-        path = []
-        while u != start_key:
-            path.append(u)
-            u = self.via[u]
-        path.append(sn.name)
-        path.reverse()
-        return path, dist
-    
-
-
 class AStar():
     def __init__(self, in_tree):
         self.in_tree = in_tree
-        self.q = Queue()
+        self.sets = []  # Priority queue for the open set
         self.dist = {name: np.inf for name, node in in_tree.g.items()}
         self.h = {name: 0 for name, node in in_tree.g.items()}
         # Initialize heuristic values based on Euclidean distance
@@ -368,44 +308,41 @@ class AStar():
         # Via dictionary to keep track of the path
         self.via = {name: 0 for name, node in in_tree.g.items()}
 
-        # Push all nodes into the queue (following the original structure)
-        for __, node in in_tree.g.items():
-            self.q.push(node)
-
     def __get_f_score(self, node):
         # Calculate f-score as the sum of g (distance from start) and h (heuristic)
-        return self.dist[node.name] + self.h[node.name]
+        return self.dist[node] + self.h[node]
 
     def solve(self, sn, en):
         # Set the start node distance to 0
         self.dist[sn.name] = 0
-        self.q.push(sn)
+        heapq.heappush(self.sets, (self.__get_f_score(sn.name), sn.name))  # Use node name instead of the object
 
 
         # Process until the queue is empty
-        while len(self.q) > 0:
-            # Sort the queue by f-score to simulate priority ordering
-            sorted_nodes = sorted(list(self.q.queue), key=lambda node: self.__get_f_score(node))
-            u = sorted_nodes[0]
-            self.q.queue.remove(u)
+        while self.sets:
+            _, u = heapq.heappop(self.sets)
+            
 
             # Check if the end node is reached
-            if u.name == en.name:
+            if u == en.name:
                 break
+            
+            current_node = self.in_tree.g[u]  # Get the actual node object
 
             # Iterate through each child of the current node
-            for i in range(len(u.children)):
-                c = u.children[i]
-                w = u.weight[i]
-                new_dist = self.dist[u.name] + w
+            for i in range(len(current_node.children)):
+                c = current_node.children[i]
+                w = current_node.weight[i]
+                new_dist = self.dist[current_node.name] + w
 
                 # Update distance and path if a shorter path is found
                 if new_dist < self.dist[c.name]:
                     self.dist[c.name] = new_dist
-                    self.via[c.name] = u.name
-                    # # Only re-add the updated node to the queue
-                    if c not in self.q.queue:
-                        self.q.push(c)
+                    self.via[c.name] = current_node.name
+                    
+                     # Push to the open set with updated f-score
+                    heapq.heappush(self.sets, (self.__get_f_score(c.name), c.name))  # Use node name
+
 
     def reconstruct_path(self, sn, en):
         start_key = sn.name
@@ -414,25 +351,24 @@ class AStar():
         u = end_key
         path = []
         while u != start_key:
-            u = self.via[u]
             path.append(u)
-        path.append(sn.name)
+            u = self.via[u]
         path.reverse()
         return path, dist
 
 
 
 
-class Navigation(Node):
-    """! Navigation node class.
+class Task2(Node):
+    """! Task2 node class.
     This class should serve as a template to implement the path planning and
     path follower components to move the turtlebot from position A to B.
     """
 
-    def __init__(self, node_name='Navigation'):
+    def __init__(self, node_name='Task2'):
         """! Class constructor.
         @param  None.
-        @return An instance of the Navigation class.
+        @return An instance of the Task2 class.
         """
         super().__init__(node_name)
         self.goal_pose = Pose()
@@ -471,24 +407,29 @@ class Navigation(Node):
     def __real_world_to_grid(self, data):        
         
         #scale found from grid (200,141) and (occupancy grid corners)
-        xscale =200/14.85 
-        yscale = 141/10.5
+        xscale = self.mp.map.map_im.size[0]/(self.mp.map.old_limits[1]-self.mp.map.old_limits[0])
+        yscale = self.mp.map.map_im.size[1]/(self.mp.map.old_limits[3]-self.mp.map.old_limits[2])
+
+        
         
         #offset by the origin from the left bottom corner 
-        pixel_y = (data.position.x+5.32)*xscale
-        pixel_x = (4.22 - data.position.y)*yscale 
+        pixel_y = (data.position.x+(-1*self.mp.map.old_limits[0]))*xscale
+        pixel_x = (self.mp.map.old_limits[3] - data.position.y)*yscale 
 
         return str(int(pixel_x)) +","+ str(int(pixel_y))  
 
     def __grid_to_real_world(self, pixel_x,pixel_y):
         
+        # #scale found from grid (200,141) and (occupancy grid corners)
+        # xscale =200/14.85
+        # yscale = 141/10.5
         #scale found from grid (200,141) and (occupancy grid corners)
-        xscale =200/14.85
-        yscale = 141/10.5
+        xscale = self.mp.map.map_im.size[0]/(self.mp.map.old_limits[1]-self.mp.map.old_limits[0])
+        yscale = self.mp.map.map_im.size[1]/(self.mp.map.old_limits[3]-self.mp.map.old_limits[2])
         
         #offset by the origin from the left bottom corner
-        world_x = (pixel_y/xscale)-5.32
-        world_y = 4.22 - (pixel_x/yscale)
+        world_x = (pixel_y/xscale)-(-1*self.mp.map.old_limits[0])
+        world_y = self.mp.map.old_limits[3] - (pixel_x/yscale)
         pose_stamped = PoseStamped()
         pose_stamped.header.frame_id = "map"  
         pose_stamped.pose.position.x = world_x
@@ -541,9 +482,6 @@ class Navigation(Node):
             self.get_logger().info(
                 'A* planner.\n>  {}'.format(node_path)   )
             path_arr_as = self.mp.draw_path(node_path)
-            # plt.imshow(path_arr_as)
-            # plt.colorbar()
-            # plt.show()
             for coordinate in node_path:
                 x,y = map(int, coordinate.split(','))
                 pose= self.__grid_to_real_world(x,y)
@@ -609,7 +547,12 @@ class Navigation(Node):
         cmd_velocity.angular.z = float(heading)
         self.cmd_publisher.publish(cmd_velocity)
 
-
+    def normalize_angle(self,angle):
+        while angle > math.pi:
+            angle -= 2.0 * math.pi
+        while angle < -math.pi:
+            angle += 2.0 * math.pi
+        return angle
 
     def get_path_idx(self):
         min_distance = float('inf')
@@ -640,7 +583,7 @@ class Navigation(Node):
         self.distance_to_goal = math.sqrt((current_goal.pose.position.x - self.ttbot_data_pose.position.x) ** 2 + (current_goal.pose.position.y - self.ttbot_data_pose.position.y) ** 2)
         target_angle = math.atan2(current_goal.pose.position.y - self.ttbot_data_pose.position.y, current_goal.pose.position.x - self.ttbot_data_pose.position.x)
         current_angle = self.get_yaw(self.ttbot_data_pose)  
-        yaw_error = target_angle-current_angle
+        yaw_error = self.normalize_angle(target_angle - current_angle)
         lin_err = 0.33
         ang_err = 0.2
         self.is_goal_reached = False
@@ -695,14 +638,14 @@ class Navigation(Node):
 def main(args=None):
     
     rclpy.init(args=args)
-    nav = Navigation(node_name='Navigation')
+    task2 = Task2(node_name='Task2')
 
     try:
-        nav.run()
+        task2.run()
     except KeyboardInterrupt:
         pass
     finally:
-        nav.destroy_node()
+        task2.destroy_node()
         rclpy.shutdown()
 
 
