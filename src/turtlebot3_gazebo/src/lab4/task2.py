@@ -20,53 +20,6 @@ from std_msgs.msg import Header
 import heapq
 
 
-class Queue():
-    def __init__(self, init_queue = []):
-        self.queue = copy(init_queue)
-        self.start = 0
-        self.end = len(self.queue)-1
-
-    def __len__(self):
-        numel = len(self.queue)
-        return numel
-
-    def __repr__(self):
-        q = self.queue
-        tmpstr = ""
-        for i in range(len(self.queue)):
-            flag = False
-            if(i == self.start):
-                tmpstr += "<"
-                flag = True
-            if(i == self.end):
-                tmpstr += ">"
-                flag = True
-
-            if(flag):
-                tmpstr += '| ' + str(q[i]) + '|\n'
-            else:
-                tmpstr += ' | ' + str(q[i]) + '|\n'
-
-        return tmpstr
-
-    def __call__(self):
-        return self.queue
-
-    def initialize_queue(self,init_queue = []):
-        self.queue = copy(init_queue)
-
-    def sort(self,key=str.lower):
-        self.queue = sorted(self.queue,key=key)
-
-    def push(self,data):
-        self.queue.append(data)
-        self.end += 1
-
-    def pop(self):
-        p = self.queue.pop(self.start)
-        self.end = len(self.queue)-1
-        return p
-
 class Map():
     def __init__(self, map_name):
         self.map_im, self.map_df, self.limits,self.old_limits = self.__open_map(map_name)
@@ -79,13 +32,10 @@ class Map():
         return ""
 
     def __open_map(self,map_name):
-        # Open the YAML file which contains the map name and other
-        # configuration parameters
-        map_name = 'src/turtlebot3_gazebo/maps/' + map_name  # Update with the path to your map.yaml
 
+        map_name = 'src/turtlebot3_gazebo/maps/' + map_name
         f = open( map_name + '.yaml', 'r')
         map_df = pd.json_normalize(yaml.safe_load(f))
-        # Open the map image
         map_name = map_df.image[0]
         map_name = 'src/turtlebot3_gazebo/maps/' + map_name
         im = Image.open(map_name)
@@ -93,8 +43,6 @@ class Map():
         size = 200, 200
         im.thumbnail(size)
         im = ImageOps.grayscale(im)
-        # Get the limits of the map. This will help to display the map
-        # with the correct axis ticks.
         xmin = map_df.origin[0][0]
         xmax = map_df.origin[0][0] + im.size[0] * map_df.resolution[0]
         ymin = map_df.origin[0][1]
@@ -113,7 +61,6 @@ class Map():
         img_array = np.reshape(list(self.map_im.getdata()),(self.map_im.size[1],self.map_im.size[0]))
         up_thresh = self.map_df.occupied_thresh[0]*255
         low_thresh = self.map_df.free_thresh[0]*255
-
         for j in range(self.map_im.size[0]):
             for i in range(self.map_im.size[1]):
                 if img_array[i,j] > up_thresh:
@@ -164,8 +111,6 @@ class MapProcessor():
                     self.__modify_map_pixel(map_array,k,l,kernel[k-i+dx][l-j+dy],absolute)
 
     def inflate_map(self,kernel,absolute=True):
-        # Perform an operation like dilation, such that the small wall found during the mapping process
-        # are increased in size, thus forcing a safer path.
         self.inf_map_img_array = np.zeros(self.map.image_array.shape)
         for i in range(self.map.image_array.shape[0]):
             for j in range(self.map.image_array.shape[1]):
@@ -177,13 +122,11 @@ class MapProcessor():
         self.inf_map_img_array = (self.inf_map_img_array - np.min(self.inf_map_img_array))/r
 
     def get_graph_from_map(self):
-        # Create the nodes that will be part of the graph, considering only valid nodes or the free space
         for i in range(self.map.image_array.shape[0]):
             for j in range(self.map.image_array.shape[1]):
                 if self.inf_map_img_array[i][j] == 0:
                     node = Noding('%d,%d'%(i,j))
                     self.map_graph.add_node(node)
-        # Connect the nodes through edges
         for i in range(self.map.image_array.shape[0]):
             for j in range(self.map.image_array.shape[1]):
                 if self.inf_map_img_array[i][j] == 0:
@@ -316,30 +259,22 @@ class AStar():
         # Set the start node distance to 0
         self.dist[sn.name] = 0
         heapq.heappush(self.sets, (self.__get_f_score(sn.name), sn.name))  # Use node name instead of the object
-
-
         # Process until the queue is empty
         while self.sets:
             _, u = heapq.heappop(self.sets)
-            
-
             # Check if the end node is reached
             if u == en.name:
                 break
-            
             current_node = self.in_tree.g[u]  # Get the actual node object
-
             # Iterate through each child of the current node
             for i in range(len(current_node.children)):
                 c = current_node.children[i]
                 w = current_node.weight[i]
                 new_dist = self.dist[current_node.name] + w
-
                 # Update distance and path if a shorter path is found
                 if new_dist < self.dist[c.name]:
                     self.dist[c.name] = new_dist
                     self.via[c.name] = current_node.name
-                    
                      # Push to the open set with updated f-score
                     heapq.heappush(self.sets, (self.__get_f_score(c.name), c.name))  # Use node name
 
@@ -383,25 +318,23 @@ class Task2(Node):
         kr = self.mp.rect_kernel(11,11)
         self.mp.inflate_map(kr,True)
         self.mp.get_graph_from_map()
+        self.ttbot_data_pose = Pose()
+        self.path_pub = self.create_publisher(Path, 'planned_path', 10)
+        self.path = Path()
+        self.path.header = Header()
+        self.path.header.frame_id = "map" 
+        self.idx = 1
+        self.angle = 0
+        self.distance_to_goal = 100
+        self.speed = 0.0
+        self.heading = 0.0
         self.lin_int_error = 0
         self.lin_prev_error = 0
         self.ang_int_error = 0
         self.ang_prev_error = 0
-        self.ttbot_data_pose = Pose()
-        self.idx = 1
-        self.angle = 0
-        self.distance_to_goal = 100
-        # Publisher for the path
-        self.path_pub = self.create_publisher(Path, 'planned_path', 10)
-        # Initialize the path message
-        self.path = Path()
-        self.path.header = Header()
-        self.path.header.frame_id = "map" 
-        self.speed = 0.0
-        self.heading = 0.0
+        self.last_idx = 0
         self.node_path = None
         self.is_goal_reached = False
-        self.last_idx = 0
     
     
     def __real_world_to_grid(self, data):        
@@ -410,8 +343,6 @@ class Task2(Node):
         xscale = self.mp.map.map_im.size[0]/(self.mp.map.old_limits[1]-self.mp.map.old_limits[0])
         yscale = self.mp.map.map_im.size[1]/(self.mp.map.old_limits[3]-self.mp.map.old_limits[2])
 
-        
-        
         #offset by the origin from the left bottom corner 
         pixel_y = (data.position.x+(-1*self.mp.map.old_limits[0]))*xscale
         pixel_x = (self.mp.map.old_limits[3] - data.position.y)*yscale 
@@ -420,7 +351,6 @@ class Task2(Node):
 
     def __grid_to_real_world(self, pixel_x,pixel_y):
         
-        # #scale found from grid (200,141) and (occupancy grid corners)
         # xscale =200/14.85
         # yscale = 141/10.5
         #scale found from grid (200,141) and (occupancy grid corners)
@@ -444,7 +374,6 @@ class Task2(Node):
         self.goal_pose = Pose()
         self.goal_pose= data.pose
         if(self.ttbot_data_pose is not None):
-            #plan path 
             path,self.node_path = self.a_star_path_planner(self.ttbot_data_pose, self.goal_pose)
             self.path_pub.publish(path)
         else:
@@ -492,7 +421,6 @@ class Task2(Node):
             self.get_logger().info(
                 'No new plan'   )
             node_path = 0
-
     
     def get_yaw(self, pose):
         orientation = pose.orientation
@@ -500,13 +428,11 @@ class Task2(Node):
         roll, pitch, yaw = euler_from_quaternion(quaternion)
         return yaw  
     
-    
     def linear_pid(self,error):
         kp = 4
         kd = 1.5
         ki = 0.0
         dt = 0.1
-        
         self.lin_int_error += error * dt
         derivative = (error - self.lin_prev_error) / dt
         self.lin_prev_error = error
@@ -521,18 +447,13 @@ class Task2(Node):
         kd = 1.5
         ki = 0.01
         dt = 0.1
-   
         self.ang_int_error += error * dt
         derivative = (error - self.ang_prev_error) / dt
         self.ang_prev_error = error
-        
         ang_vel = (kp * error) + (ki * self.ang_int_error) + (kd * derivative)
         ang_vel = min(max(ang_vel, 0.0), 0.2)
-            
         return ang_vel
     
-
-
     def goal_reached(self, current, target, off=0.20):
         dx = target.position.x - current.position.x
         dy = target.position.y - current.position.y
@@ -566,15 +487,11 @@ class Task2(Node):
             distance = np.sqrt((self.ttbot_data_pose.position.x - temp_x) ** 2 + (self.ttbot_data_pose.position.y - temp_y) ** 2)
             target_angle = math.atan2(temp_y - self.ttbot_data_pose.position.y  , temp_x - self.ttbot_data_pose.position.x)
             angle = abs(target_angle - current_angle)
-            
             if angle > angle_threshold and distance < min_distance:
                 min_distance = distance
                 potential_i = i
-                
         if potential_i is not None: 
             return potential_i
-        
-        # print("else" + str(len(self.path.poses) - 1))
         
         return (len(self.path.poses) - 1)
 
@@ -631,9 +548,6 @@ class Task2(Node):
                 self.get_logger().info("Goal reached, stopping robot")
                 self.move_ttbot(0.0, 0.0)
                 self.goal_pose = None
-        # self.rate.sleep()
-
-
 
 def main(args=None):
     
