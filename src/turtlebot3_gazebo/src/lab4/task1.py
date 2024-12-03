@@ -320,8 +320,8 @@ class Task1(Node):
             left_avg = sum(self.scan_data[271:276]) / 5  # Average for right half
                         # Calculate offset error
             alignment_error =  left_avg - right_avg   # Positive = closer to right wall
-            right_distance = min(self.scan_data[266:276])
-            print(right_distance)
+            # right_distance = avg(self.scan_data[266:276])
+            # print(right_distance)
             if( math.isinf(right_avg) or math.isinf(left_avg)):
                 # self.get_logger().warn("INF just.")
                 alignment_error =  0  # Positive = closer to right wall
@@ -343,7 +343,7 @@ class Task1(Node):
                 self.ang_side_prev_error = 0
                 self.lin_int_error = 0
                 self.lin_prev_error = 0
-            elif (right_distance > self.wall_stop_distance+0.5):  # Wall opening detected
+            elif ((right_avg+left_avg)/2 > self.wall_stop_distance+0.5):  # Wall opening detected
                 self.get_logger().warn("OPENING")
                 self.state = 'ROTATE'
                 self.is_right = True
