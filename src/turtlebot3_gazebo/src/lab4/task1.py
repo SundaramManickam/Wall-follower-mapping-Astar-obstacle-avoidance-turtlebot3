@@ -8,7 +8,7 @@ from nav_msgs.msg import Odometry
 from tf_transformations import euler_from_quaternion
 import math
 import numpy as np
-
+import time
 
 class Task1(Node):
     """
@@ -61,6 +61,7 @@ class Task1(Node):
         self.ttbot_data_pose = Pose()
         self.yaw = 0.0
         self.state = 'FINDING_WALL'  # States: FINDING_WALL, ALIGNING_WITH_WALL, FOLLOWING_WALL, CORRECTING_PATH
+        self.is_right = False
         self.destination_yaw = 0.0
         # Control Parameters
         self.forward_speed = 0.2
@@ -154,6 +155,16 @@ class Task1(Node):
         median_idx = np.searchsorted(cum_weights, cum_weights[-1] / 2)
         return sorted_data[median_idx][0]
     
+    def move_forward(self):
+        twist = Twist()
+        print("moving forwards")
+        twist.linear.x = 0.3
+        twist.angular.z = 0.0
+        self.cmd_vel_publisher.publish(twist)
+        time.sleep(1)
+        twist.linear.x = 0.0
+        self.cmd_vel_publisher.publish(twist)
+        
     def wall_following_logic(self):
         """Main logic for wall-following behavior."""
         
@@ -225,6 +236,15 @@ class Task1(Node):
             # print(yaw_error)
             # is_side_looking_at_wall = (right_avg - self.wall_stop_distance <0.05 and left_avg - self.wall_stop_distance <0.05)
             if (abs(yaw_error) + abs(alignment_error) <= 0.07 or (abs(alignment_error)<=0.07 and abs(yaw_error)<0.7)):  # Close enough to the target angle
+                
+                # if(self.is_right):
+                #     print("sleep")
+                #     time.sleep(0.5)
+                # if(self.destination_yaw>0):
+                #     print("sleep")
+                # #     self.move_forward()
+                #     time.sleep(0.5)
+                #     print("sleep over")
                 self.get_logger().warn("ROTATE - ALIGNING_WITH_WALL")
                 self.state = 'ALIGNING_WITH_WALL'
                 self.ang_int_error = 0
@@ -240,12 +260,12 @@ class Task1(Node):
                 twist.angular.z = self.alignment_pid(abs(yaw_error)) if (yaw_error) > 0 else -self.alignment_pid(abs(yaw_error))
                 
                 twist.linear.x =self.linear_pid(max(min(self.distance_error, 0.35), -0.35))
-                print(min_front_distance)
-                print(min_index)
+                # print(min_front_distance)
+                # print(min_index)
                 if(min_front_distance<threshold_distance):
                     print(".............................................reversing")
                     # print(min_front_distance)
-                    twist.linear.x = -0.2
+                    twist.linear.x = -0.05
                     twist.angular.z = 0.0
                     # if( min_index in range(0,35)):
                     #     twist.angular.z = 0.08
@@ -300,6 +320,8 @@ class Task1(Node):
             left_avg = sum(self.scan_data[271:276]) / 5  # Average for right half
                         # Calculate offset error
             alignment_error =  left_avg - right_avg   # Positive = closer to right wall
+            right_distance = min(self.scan_data[266:276])
+            print(right_distance)
             if( math.isinf(right_avg) or math.isinf(left_avg)):
                 # self.get_logger().warn("INF just.")
                 alignment_error =  0  # Positive = closer to right wall
@@ -308,11 +330,12 @@ class Task1(Node):
             # self.get_logger().warn(f"Alignment Error: {alignment_error:.2f}")
             # self.get_logger().warn(f"Side Distance Error: {side_distance_error:.2f}")
             # self.get_logger().warn(f"Left Avg: {left_avg:.2f}, Right Avg: {right_avg:.2f}")
-            self.get_logger().warn(f"FRONT_DISTANCE: {front_distance:.2f}, SIDE_DISTANCE: {side_distance:.2f}")
+            # self.get_logger().info(f"FRONT_DISTANCE: {front_distance:.2f}, SIDE_DISTANCE: {side_distance:.2f}")
 
             if (front_distance >0.2 and front_distance < self.wall_stop_distance):
                 self.get_logger().warn("CLOSING")
                 self.state="ROTATE"
+                self.is_right = False
                 self.set_destination_yaw(math.pi / 2)  # Turn 90° left
                 self.ang_int_error = 0
                 self.ang_prev_error = 0
@@ -320,9 +343,10 @@ class Task1(Node):
                 self.ang_side_prev_error = 0
                 self.lin_int_error = 0
                 self.lin_prev_error = 0
-            elif ((right_avg+left_avg)/2) > self.wall_stop_distance+0.5:  # Wall opening detected
+            elif (right_distance > self.wall_stop_distance+0.5):  # Wall opening detected
                 self.get_logger().warn("OPENING")
                 self.state = 'ROTATE'
+                self.is_right = True
                 self.set_destination_yaw(-math.pi / 2)  # Turn 90° right
                 self.ang_int_error = 0
                 self.ang_prev_error = 0
@@ -342,7 +366,7 @@ class Task1(Node):
                 if(min_front_distance<threshold_distance):
                     print("...........................reversing")
                     # print(min_front_distance)
-                    twist.linear.x = -0.2
+                    twist.linear.x = -0.05
                     twist.angular.z = 0.0
                     # if( min_index in range(0,35)):
                     #     twist.angular.z = 0.08
