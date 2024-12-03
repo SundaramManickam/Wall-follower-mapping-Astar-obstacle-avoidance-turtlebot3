@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import time
 import rclpy
 from rclpy.node import Node
@@ -12,6 +14,7 @@ from enum import Enum
 from sensor_msgs.msg import LaserScan
 from geometry_msgs.msg import Point
 from visualization_msgs.msg import MarkerArray, Marker
+import warnings
 
 import pandas as pd
 import math
@@ -25,6 +28,7 @@ from tf_transformations import euler_from_quaternion
 from nav_msgs.msg import Path
 from std_msgs.msg import Header
 import heapq
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 
 class Map():
@@ -426,9 +430,9 @@ class Task3(Node):
                                             ('p_min_group_points', 5),
                                             ('p_max_merge_separation', 0.02),
                                             ('p_max_merge_spread', 0.01),
-                                            ('p_max_circle_radius', 0.7),
-                                            ('p_radius_enlargement', 0.25),
-                                            ('p_min_obstacle_size', 0.01)])
+                                            ('p_max_circle_radius', 0.5),
+                                            ('p_radius_enlargement', 0.2),
+                                            ('p_min_obstacle_size', 0.1)])
         self.p_max_group_distance = self.get_parameter('p_max_group_distance').value
         self.p_distance_proportion = self.get_parameter('p_distance_proportion').value
         self.p_max_split_distance = self.get_parameter('p_max_split_distance').value
@@ -455,7 +459,7 @@ class Task3(Node):
                                  QoSProfile(depth=10, reliability=ReliabilityPolicy.BEST_EFFORT))
 
         self.marker_pub = self.create_publisher(MarkerArray, 'marker', 10)
-        
+        self.obstacles = False
         
         #NAVIGATION
         self.goal_pose = Pose()
@@ -512,7 +516,7 @@ class Task3(Node):
         # visualizing in RViz
         self.marker_pub.publish(self.visualize_groups_and_obstacles())
 
-        self.get_logger().info("Time taken to process scan %.3f" % (time.time() - start_time))
+        # self.get_logger().info("Time taken to process scan %.3f" % (time.time() - start_time))
 
     def grouping(self):
        
@@ -542,8 +546,8 @@ class Task3(Node):
             self.groups.append(a_group)
             points_remaining = [point for point in points_remaining if point not in a_group.points]
 
-        self.get_logger().info("grouping() completed, number of groups = %d (took %.2f sec)" % (len(self.groups),
-                                                                                                (time.time() - _time)))
+        # self.get_logger().info("grouping() completed, number of groups = %d (took %.2f sec)" % (len(self.groups),
+        #                                                                                         (time.time() - _time)))
 
     def splitting(self):
         
@@ -597,8 +601,8 @@ class Task3(Node):
                 groups_after_splitting.append(grp)
 
         self.groups = groups_after_splitting
-        self.get_logger().info("splitting() completed, number of groups = %d (took %.2f sec)" % (len(self.groups),
-                                                                                                 (time.time() - _time)))
+        # self.get_logger().info("splitting() completed, number of groups = %d (took %.2f sec)" % (len(self.groups),
+        #                                                                                          (time.time() - _time)))
 
     def line_fitting(self):
         """
@@ -609,7 +613,7 @@ class Task3(Node):
         for grp in self.groups:
             grp.calculate_best_fit_line()
 
-        self.get_logger().info("line_fitting() completed (took %.2f sec)" % (time.time() - _time))
+        # self.get_logger().info("line_fitting() completed (took %.2f sec)" % (time.time() - _time))
 
     def segment_merging(self):
         """
@@ -659,8 +663,8 @@ class Task3(Node):
 
         # it's possible duplicates have crept into merged_groups, so they need to be removed
         self.groups = list(set(merged_groups))
-        self.get_logger().info("segment_merging() completed, number of groups = %d (took %.2f sec)" % (len(self.groups),
-                                                                                                       (time.time() - _time)))
+        # self.get_logger().info("segment_merging() completed, number of groups = %d (took %.2f sec)" % (len(self.groups),
+        #                                                                                                (time.time() - _time)))
 
     def circle_fitting(self):
         """
@@ -672,7 +676,7 @@ class Task3(Node):
         for grp in self.groups:
             grp._circle_fitting_least_squares_method()
 
-        self.get_logger().info("circle_fitting completed (took %.2f sec)" % (time.time() - _time))
+        # self.get_logger().info("circle_fitting completed (took %.2f sec)" % (time.time() - _time))
 
     def obstacle_classification(self):
         """
@@ -687,14 +691,14 @@ class Task3(Node):
         for grp in self.groups:
             if grp.best_fit_circle.radius + self.p_radius_enlargement <= self.p_max_circle_radius:
                 self.obstacles_circles.append(grp)
-                self.get_logger().info(f"The node {grp.best_fit_circle.center}")
+                # self.get_logger().info(f"The node {grp.best_fit_circle.center.x,grp.best_fit_circle.center.y}")
                 
             else:
                 self.obstacles_lines.append(grp)
 
-        self.get_logger().info("%d groups separated into %d lines and %d circles (took %.2f sec)" %
-                               (len(self.groups), len(self.obstacles_lines), len(self.obstacles_circles),
-                                (time.time() - _time)))
+        # self.get_logger().info("%d groups separated into %d lines and %d circles (took %.2f sec)" %
+        #                        (len(self.groups), len(self.obstacles_lines), len(self.obstacles_circles),
+        #                         (time.time() - _time)))
 
     def remove_small_obstacles(self):
         """
@@ -725,9 +729,9 @@ class Task3(Node):
 
         # print message if any lines or circles were removed
         one_or_more_obstacles_removed = len(self.obstacles_lines) < no_of_detected_lines or len(self.obstacles_circles) < no_of_detected_circles
-        if one_or_more_obstacles_removed:
-            self.get_logger().info("After removing small obstacles, %d lines and %d circles remain (took %.2f sec)" %
-                                   (len(self.obstacles_lines), len(self.obstacles_circles), (time.time() - _time)))
+        # if one_or_more_obstacles_removed:
+            # self.get_logger().info("After removing small obstacles, %d lines and %d circles remain (took %.2f sec)" %
+            #                        (len(self.obstacles_lines), len(self.obstacles_circles), (time.time() - _time)))
 
     def visualize_groups_and_obstacles(self):
         marker_list = []
@@ -826,22 +830,18 @@ class Task3(Node):
     def callback_lidar_data(self, laser_scan):
         self.header = laser_scan.header
         theta = np.arange(laser_scan.angle_min, laser_scan.angle_max, laser_scan.angle_increment)
-        print("-----------")
+        # print("-----------")
         r = np.array(laser_scan.ranges)
-        print("Number of samples = %d, resolution = %.4f degree" % (len(theta), laser_scan.angle_increment * 180.0 / np.pi))
+        # print("Number of samples = %d, resolution = %.4f degree" % (len(theta), laser_scan.angle_increment * 180.0 / np.pi))
 
         # making sure len(theta) == len(r)  [is this check even required?]
         if len(theta) != len(r):
             if len(theta) < len(r):
                 r = r[:len(theta)]  # truncate r
-                self.get_logger().warn(
-                    "Polar coordinates theta and r have unequal lengths (%d and %d resp.), r has been truncated" % (
-                        len(theta), len(r)))
+
             else:
                 theta = theta[:len(r)]  # truncate theta
-                self.get_logger().warn(
-                    "Polar coordinates theta and r have unequal lengths (%d and %d resp.), theta has been truncated" % (
-                        len(theta), len(r)))
+
 
         # convert points from polar coordinates to cartesian coordinates
         indices_of_valid_r = [i for i in range(len(r)) if laser_scan.range_min <= r[i] < laser_scan.range_max]
@@ -849,8 +849,88 @@ class Task3(Node):
         self.points = [Point(x=r[i] * np.cos(theta[i]), y=r[i] * np.sin(theta[i]), z=0.0)  # 2D lidar doesn't have Z
                        for i in range(len(r))]
 
+        if (min(laser_scan.ranges[0:100]+laser_scan.ranges[260:360])<0.10):
+            print("stopping because laser_detected")
+            self.move_ttbot(-0.5, 0.0)
+            time.sleep(0.25)
+            self.move_ttbot(0,0)
+
+        # elif (min(laser_scan.ranges[145:215])<0.25):
+        entered = False
         self.reset_state()
         self.detect_obstacles()
+        if(len(self.obstacles_circles)):
+            value = 0
+            print(value)
+            for grp in self.obstacles_circles:
+                # print(grp.best_fit_circle.radius)
+                # return
+                if(grp.best_fit_circle.radius > 0.20 and grp.best_fit_circle.radius < 0.25):
+                    value+=1
+                    print("s" + str(value))
+                    x = grp.best_fit_circle.center.x
+                    y = grp.best_fit_circle.center.y
+                    radius = grp.best_fit_circle.radius
+                    distance_from_robot = np.sqrt(x ** 2 + y ** 2) - radius
+                    # print(distance_from_robot)
+                    print(x,y)
+                    if(distance_from_robot < 0.7 and not entered):
+                        print("DETECTED_OBSTACLEEEE")
+                        print(x,y)
+                        if(x>0 and abs(y-0)<0.3):
+                            #obstacele head on
+                            print("HEAD ON")
+                            time.sleep(0.5)
+                            self.move_ttbot(0.2,0.0)
+                            time.sleep(0.50)
+                            self.move_ttbot(0.0,0.0)
+                            entered = True
+                            self.obstacles = True
+                        elif(x<0.3 and abs(y)<0.6):
+                            print("exactly left or right ")
+                            self.move_ttbot(0.3,0.0)
+                            time.sleep(0.50)
+                            self.move_ttbot(0.0,0.0)
+                            entered = True
+                            self.obstacles = True
+                        elif(x>0.3 and x<0.9 and y>0 and y<0.6):
+                            #obstacle on the left and closing
+                            print("closing and left side")
+                            # time.sleep(1)
+                            self.move_ttbot(-0.2, 0.0)
+                            time.sleep(0.25)
+                            self.move_ttbot(0.0,0.0)
+                            entered = True
+                            self.obstacles = True
+                        elif(x>0.3 and x<0.9 and y<0 and y>-0.6):
+                            #obstacle on the right and closing
+                            print("closing and right side")
+                            # time.sleep(1)
+                            self.move_ttbot(-0.2, 0.0)
+                            time.sleep(0.25)
+                            self.move_ttbot(0.0,0.0)
+                            entered = True
+                            self.obstacles = True
+                        elif(x>0 and x<0.1 and y>0.6):
+                            print("far and left side")
+                            entered = False
+                            # time.sleep(0.5)
+                        elif(x>0 and x<0.1 and y<-0.6):
+                            print("far and right side")
+                            entered = False
+                        elif(x<0):
+                            entered = True
+                            self.move_ttbot(0.2, 0.0)
+                            time.sleep(0.25)
+                            self.move_ttbot(0,0)
+                            print("back")
+
+        else:
+            self.obstacles = False
+            entered = False
+            
+            
+        
         
     
     def __real_world_to_grid(self, data):        
@@ -955,7 +1035,7 @@ class Task3(Node):
         linear_velocity = (kp * error) + (ki * self.lin_int_error) + (kd * derivative)
         if math.isinf(linear_velocity):
             linear_velocity = 0.0
-        linear_velocity = min(max(linear_velocity, 0.0), 0.2)  # Clamp velocity to [0.0, 0.15]
+        linear_velocity = min(max(linear_velocity, 0.0), 0.3)  # Clamp velocity to [0.0, 0.15]
         return linear_velocity
     
     def angular_pid(self,error):
@@ -967,10 +1047,10 @@ class Task3(Node):
         derivative = (error - self.ang_prev_error) / dt
         self.ang_prev_error = error
         ang_vel = (kp * error) + (ki * self.ang_int_error) + (kd * derivative)
-        ang_vel = min(max(ang_vel, 0.0), 0.2)
+        ang_vel = min(max(ang_vel, 0.0), 0.3)
         return ang_vel
     
-    def goal_reached(self, current, target, off=0.20):
+    def goal_reached(self, current, target, off=0.30):
         dx = target.position.x - current.position.x
         dy = target.position.y - current.position.y
         distance = np.sqrt(dx ** 2 + dy ** 2)
@@ -1017,7 +1097,7 @@ class Task3(Node):
         target_angle = math.atan2(current_goal.pose.position.y - self.ttbot_data_pose.position.y, current_goal.pose.position.x - self.ttbot_data_pose.position.x)
         current_angle = self.get_yaw(self.ttbot_data_pose)  
         yaw_error = self.normalize_angle(target_angle - current_angle)
-        lin_err = 0.33
+        lin_err = 0.25
         ang_err = 0.2
         self.is_goal_reached = False
         if(abs(yaw_error) > ang_err):
@@ -1044,6 +1124,8 @@ class Task3(Node):
         while rclpy.ok():
             rclpy.spin_once(self, timeout_sec=0.1)
             starting = self.__real_world_to_grid(self.ttbot_data_pose)
+            # print("runing")
+            
             self.ttbot_pose_tuple = tuple(map(int, starting.split(',')))
             if(self.node_path is not None):
                 while not self.goal_reached(self.ttbot_data_pose,self.goal_pose):
@@ -1053,6 +1135,10 @@ class Task3(Node):
                     current_goal = self.path.poses[self.idx]
                     # print(current_goal)
                     while(not self.is_goal_reached):
+                        # print("runing")
+                        if(self.obstacles):
+                            self.is_goal_reached = True
+                            continue
                         rclpy.spin_once(self, timeout_sec=0.1)
                         self.path_navigator(current_goal)
                         self.move_ttbot(self.speed,self.heading)
@@ -1061,7 +1147,6 @@ class Task3(Node):
                     
                 self.get_logger().info("Goal reached, stopping robot")
                 self.move_ttbot(0.0, 0.0)
-                self.goal_pose = None
 
 
 
@@ -1072,6 +1157,7 @@ def main(args=None):
     try:
         # rclpy.spin(task3)
         task3.run()
+        # print("runing")
     except KeyboardInterrupt:
         pass
     finally:
