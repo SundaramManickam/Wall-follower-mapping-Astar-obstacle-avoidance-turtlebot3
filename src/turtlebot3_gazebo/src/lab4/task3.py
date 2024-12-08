@@ -491,7 +491,7 @@ class Task3(Node):
         self.last_idx = 0
         self.node_path = None
         self.is_goal_reached = False
-
+        self.plan_done = False
 
     def reset_state(self):
 
@@ -764,28 +764,28 @@ class Task3(Node):
                     self._all_marker_IDs.append(dummy_id)
                 dummy_id += 1
 
-        # Obstacles represented by lines
-        for grp in self.obstacles_lines:
-            marker = Marker()
-            marker.id = dummy_id
-            marker.header = self.header
-            marker.type = Marker.LINE_STRIP
-            marker.action = 0  # 0 add/modify an object, 1 (deprecated), 2 deletes an object, 3 deletes all objects
-            marker.color.a = 0.8
-            marker.color.r = 1.0
-            marker.color.g = 0.0
-            marker.color.b = 0.0
-            marker.scale.x = 0.05
-            marker.points = grp.best_fit_line.endpoints
-            marker.points[0].z, marker.points[1].z = 0.035, 0.035  # based on diameter of sphere markers
-            marker.pose.orientation.x = 0.0
-            marker.pose.orientation.y = 0.0
-            marker.pose.orientation.z = 0.0
-            marker.pose.orientation.w = 1.0
-            marker_list.append(marker)
-            if dummy_id not in self._all_marker_IDs:
-                self._all_marker_IDs.append(dummy_id)
-            dummy_id += 1
+        # # Obstacles represented by lines
+        # for grp in self.obstacles_lines:
+        #     marker = Marker()
+        #     marker.id = dummy_id
+        #     marker.header = self.header
+        #     marker.type = Marker.LINE_STRIP
+        #     marker.action = 0  # 0 add/modify an object, 1 (deprecated), 2 deletes an object, 3 deletes all objects
+        #     marker.color.a = 0.8
+        #     marker.color.r = 1.0
+        #     marker.color.g = 0.0
+        #     marker.color.b = 0.0
+        #     marker.scale.x = 0.05
+        #     marker.points = grp.best_fit_line.endpoints
+        #     marker.points[0].z, marker.points[1].z = 0.035, 0.035  # based on diameter of sphere markers
+        #     marker.pose.orientation.x = 0.0
+        #     marker.pose.orientation.y = 0.0
+        #     marker.pose.orientation.z = 0.0
+        #     marker.pose.orientation.w = 1.0
+        #     marker_list.append(marker)
+        #     if dummy_id not in self._all_marker_IDs:
+        #         self._all_marker_IDs.append(dummy_id)
+        #     dummy_id += 1
 
         # Obstacles represented by circles
         for grp in self.obstacles_circles:
@@ -849,81 +849,56 @@ class Task3(Node):
         self.points = [Point(x=r[i] * np.cos(theta[i]), y=r[i] * np.sin(theta[i]), z=0.0)  # 2D lidar doesn't have Z
                        for i in range(len(r))]
 
-        if (min(laser_scan.ranges[0:100]+laser_scan.ranges[260:360])<0.10):
-            print("stopping because laser_detected")
+        if (min(laser_scan.ranges[0:100]+laser_scan.ranges[260:360])<0.30):
+            print("lidar moving up")
             self.move_ttbot(-0.5, 0.0)
             time.sleep(0.25)
-            self.move_ttbot(0,0)
+            self.move_ttbot(0.0, 0.0)
+
+        if (min(laser_scan.ranges[145:215])<0.25):
+            print("lidar moving down")
+            
+            self.move_ttbot(0.5, 0.0)
+            time.sleep(0.25)
+            self.move_ttbot(0.0, 0.0)
 
         # elif (min(laser_scan.ranges[145:215])<0.25):
         entered = False
         self.reset_state()
         self.detect_obstacles()
-        if(len(self.obstacles_circles)):
-            value = 0
-            print(value)
+        if(len(self.obstacles_circles) and not self.plan_done):
             for grp in self.obstacles_circles:
                 # print(grp.best_fit_circle.radius)
                 # return
                 if(grp.best_fit_circle.radius > 0.20 and grp.best_fit_circle.radius < 0.25):
-                    value+=1
-                    print("s" + str(value))
                     x = grp.best_fit_circle.center.x
                     y = grp.best_fit_circle.center.y
                     radius = grp.best_fit_circle.radius
                     distance_from_robot = np.sqrt(x ** 2 + y ** 2) - radius
+                    # print(self.obstacles)
                     # print(distance_from_robot)
                     print(x,y)
-                    if(distance_from_robot < 0.7 and not entered):
-                        print("DETECTED_OBSTACLEEEE")
-                        print(x,y)
-                        if(x>0 and abs(y-0)<0.3):
-                            #obstacele head on
-                            print("HEAD ON")
-                            time.sleep(0.5)
-                            self.move_ttbot(0.2,0.0)
-                            time.sleep(0.50)
-                            self.move_ttbot(0.0,0.0)
-                            entered = True
-                            self.obstacles = True
-                        elif(x<0.3 and abs(y)<0.6):
-                            print("exactly left or right ")
-                            self.move_ttbot(0.3,0.0)
-                            time.sleep(0.50)
-                            self.move_ttbot(0.0,0.0)
-                            entered = True
-                            self.obstacles = True
-                        elif(x>0.3 and x<0.9 and y>0 and y<0.6):
-                            #obstacle on the left and closing
-                            print("closing and left side")
-                            # time.sleep(1)
-                            self.move_ttbot(-0.2, 0.0)
-                            time.sleep(0.25)
-                            self.move_ttbot(0.0,0.0)
-                            entered = True
-                            self.obstacles = True
-                        elif(x>0.3 and x<0.9 and y<0 and y>-0.6):
-                            #obstacle on the right and closing
-                            print("closing and right side")
-                            # time.sleep(1)
-                            self.move_ttbot(-0.2, 0.0)
-                            time.sleep(0.25)
-                            self.move_ttbot(0.0,0.0)
-                            entered = True
-                            self.obstacles = True
-                        elif(x>0 and x<0.1 and y>0.6):
-                            print("far and left side")
-                            entered = False
-                            # time.sleep(0.5)
-                        elif(x>0 and x<0.1 and y<-0.6):
-                            print("far and right side")
-                            entered = False
-                        elif(x<0):
-                            entered = True
-                            self.move_ttbot(0.2, 0.0)
-                            time.sleep(0.25)
-                            self.move_ttbot(0,0)
-                            print("back")
+                    # if(x<0.4 and x>0 and abs(y)<0.7):
+                    #     print("right or left")
+                    #     self.obstacles = True
+                    #     self.move_ttbot(-0.2,0)
+                    #     time.sleep(0.2)
+                    if(x>0.6 and x <1.3 and abs(y) <1):
+                        print("obstacle_detected")
+                        self.obstacles = True
+                        self.move_ttbot(0,0)
+                        time.sleep(0.1)
+                        # self.move_ttbot(0.5,0)
+                        # time.sleep(0.4)
+                    elif(x <0.6 and x>-0.6 and abs(y) <1.5):
+                        print("right or left")
+                        self.obstacles = True
+                        self.move_ttbot(0.5,0)
+                        time.sleep(0.2)
+                        # self.move_ttbot(0,0)
+                        # time.sleep(0.1)
+                    else:
+                        self.obstacles = False
 
         else:
             self.obstacles = False
@@ -969,6 +944,7 @@ class Task3(Node):
     def __goal_pose_cbk(self, data):
         self.goal_pose = Pose()
         self.goal_pose= data.pose
+        self.plan_done = False
         if(self.ttbot_data_pose is not None):
             path,self.node_path = self.a_star_path_planner(self.ttbot_data_pose, self.goal_pose)
             self.path_pub.publish(path)
@@ -1039,7 +1015,7 @@ class Task3(Node):
         return linear_velocity
     
     def angular_pid(self,error):
-        kp = 3
+        kp = 7
         kd = 1.5
         ki = 0.01
         dt = 0.1
@@ -1047,7 +1023,7 @@ class Task3(Node):
         derivative = (error - self.ang_prev_error) / dt
         self.ang_prev_error = error
         ang_vel = (kp * error) + (ki * self.ang_int_error) + (kd * derivative)
-        ang_vel = min(max(ang_vel, 0.0), 0.3)
+        ang_vel = min(max(ang_vel, 0.0), 0.5)
         return ang_vel
     
     def goal_reached(self, current, target, off=0.30):
@@ -1097,12 +1073,12 @@ class Task3(Node):
         target_angle = math.atan2(current_goal.pose.position.y - self.ttbot_data_pose.position.y, current_goal.pose.position.x - self.ttbot_data_pose.position.x)
         current_angle = self.get_yaw(self.ttbot_data_pose)  
         yaw_error = self.normalize_angle(target_angle - current_angle)
-        lin_err = 0.25
-        ang_err = 0.2
+        lin_err = 0.3
+        ang_err = 0.3
         self.is_goal_reached = False
         if(abs(yaw_error) > ang_err):
             
-            self.speed = 0.005
+            self.speed = 0.01
             self.heading = self.angular_pid(abs(yaw_error)) if yaw_error > 0 else -self.angular_pid(abs(yaw_error))
         elif ((self.distance_to_goal > lin_err)): 
             self.speed = self.linear_pid(self.distance_to_goal)
@@ -1128,23 +1104,28 @@ class Task3(Node):
             
             self.ttbot_pose_tuple = tuple(map(int, starting.split(',')))
             if(self.node_path is not None):
-                while not self.goal_reached(self.ttbot_data_pose,self.goal_pose):
+                while (not self.goal_reached(self.ttbot_data_pose,self.goal_pose)):
                     rclpy.spin_once(self, timeout_sec=0.1)
-                    self.idx = self.get_path_idx()
-                    print("waypoint no:" + str(self.idx))
-                    current_goal = self.path.poses[self.idx]
-                    # print(current_goal)
-                    while(not self.is_goal_reached):
-                        # print("runing")
-                        if(self.obstacles):
-                            self.is_goal_reached = True
-                            continue
-                        rclpy.spin_once(self, timeout_sec=0.1)
-                        self.path_navigator(current_goal)
-                        self.move_ttbot(self.speed,self.heading)
-                    self.last_idx = self.idx+1
-                    self.is_goal_reached = False
-                    
+                    if(not self.obstacles):
+                        self.idx = self.get_path_idx()
+                        print("waypoint no:" + str(self.idx))
+                        current_goal = self.path.poses[self.idx]
+                        # print(current_goal)
+                        while(not self.is_goal_reached):
+                            # print("runing")
+                            # if():
+                            #     self.is_goal_reached = True
+                            #     # continue
+                            rclpy.spin_once(self, timeout_sec=0.1)
+                            if(self.obstacles):
+                                self.is_goal_reached = True
+                                print("skipping")
+                                continue
+                            self.path_navigator(current_goal)
+                            self.move_ttbot(self.speed,self.heading)
+                        self.last_idx = self.idx+1
+                        self.is_goal_reached = False
+                self.plan_done = True  
                 self.get_logger().info("Goal reached, stopping robot")
                 self.move_ttbot(0.0, 0.0)
 
