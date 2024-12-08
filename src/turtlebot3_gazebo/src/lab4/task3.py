@@ -11,16 +11,17 @@ from sklearn.linear_model import LinearRegression
 from scipy import optimize
 from scipy.spatial import ConvexHull
 from enum import Enum
-from sensor_msgs.msg import LaserScan
-from geometry_msgs.msg import Point
+from sensor_msgs.msg import LaserScan, Image
 from visualization_msgs.msg import MarkerArray, Marker
 import warnings
-
+import cv2
+from cv_bridge import CvBridge, CvBridgeError
 import pandas as pd
 import math
 import yaml
-from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, Pose, Twist
-from PIL import Image, ImageOps
+from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, Pose, Twist, Point, TransformStamped
+import PIL.Image
+from PIL import  ImageOps
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 from graphviz import Graph
@@ -28,6 +29,7 @@ from tf_transformations import euler_from_quaternion
 from nav_msgs.msg import Path
 from std_msgs.msg import Header
 import heapq
+
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 
@@ -49,7 +51,7 @@ class Map():
         map_df = pd.json_normalize(yaml.safe_load(f))
         map_name = map_df.image[0]
         map_name = 'src/turtlebot3_gazebo/maps/' + map_name
-        im = Image.open(map_name)
+        im = PIL.Image.open(map_name)
         im_width,im_height = im.size
         size = 200, 200
         im.thumbnail(size)
@@ -448,8 +450,8 @@ class Task3(Node):
         # Initialize some empty lists
         self.points = []  # cartesian points (XY coordinates)
         self.groups = []  # list of Group() objects
-        self.obstacles_lines = []  # list of obstacles represented as lines
-        self.obstacles_circles = []  # list of obstacles represented as circles
+        self._is_obstacle_detected_lines = []  # list of obstacles represented as lines
+        self._is_obstacle_detected_circles = []  # list of obstacles represented as circles
 
         # for keeping track of which markers to delete
         self._all_marker_IDs = []
@@ -459,13 +461,14 @@ class Task3(Node):
                                  QoSProfile(depth=10, reliability=ReliabilityPolicy.BEST_EFFORT))
 
         self.marker_pub = self.create_publisher(MarkerArray, 'marker', 10)
-        self.obstacles = False
+        self._is_obstacle_detected = False
         
         #NAVIGATION
         self.goal_pose = Pose()
         # Subscribers
         self.create_subscription(PoseStamped, '/move_base_simple/goal', self.__goal_pose_cbk, 10)
         self.create_subscription(PoseWithCovarianceStamped, '/amcl_pose', self.__ttbot_pose_cbk, 10)
+        self.create_subscription(Image, '/camera/image_raw', self.image_callback, 10)
 
         # Publishers
         self.cmd_publisher = self.create_publisher(Twist, 'cmd_vel', 10)
@@ -492,12 +495,13 @@ class Task3(Node):
         self.node_path = None
         self.is_goal_reached = False
         self.plan_done = False
-
+        self.bridge = CvBridge()
+        self.last_detected = False
     def reset_state(self):
 
         self.groups = []  # list of Group() objects
-        self.obstacles_lines = []  # list of obstacles represented as lines
-        self.obstacles_circles = []  # list of obstacles represented as circles
+        self._is_obstacle_detected_lines = []  # list of obstacles represented as lines
+        self._is_obstacle_detected_circles = []  # list of obstacles represented as circles
 
     def detect_obstacles(self):
 
@@ -516,7 +520,6 @@ class Task3(Node):
         # visualizing in RViz
         self.marker_pub.publish(self.visualize_groups_and_obstacles())
 
-        # self.get_logger().info("Time taken to process scan %.3f" % (time.time() - start_time))
 
     def grouping(self):
        
@@ -542,11 +545,9 @@ class Task3(Node):
                     a_group.points.append(p)
                     point_from = p
 
-            # at this point, all points satisfying the above condition have been added to group
             self.groups.append(a_group)
             points_remaining = [point for point in points_remaining if point not in a_group.points]
 
-        # self.get_logger().info("grouping() completed, number of groups = %d (took %.2f sec)" % (len(self.groups),
         #                                                                                         (time.time() - _time)))
 
     def splitting(self):
@@ -601,7 +602,6 @@ class Task3(Node):
                 groups_after_splitting.append(grp)
 
         self.groups = groups_after_splitting
-        # self.get_logger().info("splitting() completed, number of groups = %d (took %.2f sec)" % (len(self.groups),
         #                                                                                          (time.time() - _time)))
 
     def line_fitting(self):
@@ -613,7 +613,6 @@ class Task3(Node):
         for grp in self.groups:
             grp.calculate_best_fit_line()
 
-        # self.get_logger().info("line_fitting() completed (took %.2f sec)" % (time.time() - _time))
 
     def segment_merging(self):
         """
@@ -661,10 +660,7 @@ class Task3(Node):
                 merged_groups.append(group1)
                 merged_groups.append(group2)
 
-        # it's possible duplicates have crept into merged_groups, so they need to be removed
         self.groups = list(set(merged_groups))
-        # self.get_logger().info("segment_merging() completed, number of groups = %d (took %.2f sec)" % (len(self.groups),
-        #                                                                                                (time.time() - _time)))
 
     def circle_fitting(self):
         """
@@ -676,7 +672,6 @@ class Task3(Node):
         for grp in self.groups:
             grp._circle_fitting_least_squares_method()
 
-        # self.get_logger().info("circle_fitting completed (took %.2f sec)" % (time.time() - _time))
 
     def obstacle_classification(self):
         """
@@ -690,16 +685,10 @@ class Task3(Node):
         # check whether circle (after enlargement) is to be added to list of circle obstacles or line obstacles
         for grp in self.groups:
             if grp.best_fit_circle.radius + self.p_radius_enlargement <= self.p_max_circle_radius:
-                self.obstacles_circles.append(grp)
-                # self.get_logger().info(f"The node {grp.best_fit_circle.center.x,grp.best_fit_circle.center.y}")
+                self._is_obstacle_detected_circles.append(grp)
                 
             else:
-                self.obstacles_lines.append(grp)
-
-        # self.get_logger().info("%d groups separated into %d lines and %d circles (took %.2f sec)" %
-        #                        (len(self.groups), len(self.obstacles_lines), len(self.obstacles_circles),
-        #                         (time.time() - _time)))
-
+                self._is_obstacle_detected_lines.append(grp)
     def remove_small_obstacles(self):
         """
         Only keep those obstacles which satisfy these conditions:
@@ -715,80 +704,24 @@ class Task3(Node):
         if self.p_min_obstacle_size <= 0.0:
             return
         elif self.p_min_obstacle_size == float('inf'):
-            self.obstacles_lines = []
-            self.obstacles_circles = []
+            self._is_obstacle_detected_lines = []
+            self._is_obstacle_detected_circles = []
             return
 
-        no_of_detected_lines, no_of_detected_circles = len(self.obstacles_lines), len(self.obstacles_circles)
+        no_of_detected_lines, no_of_detected_circles = len(self._is_obstacle_detected_lines), len(self._is_obstacle_detected_circles)
 
-        # iterate over lines and circles to check which ones to keep
-        self.obstacles_lines = [grp for grp in self.obstacles_lines
+        self._is_obstacle_detected_lines = [grp for grp in self._is_obstacle_detected_lines
                                 if grp.best_fit_line.length >= self.p_min_obstacle_size]
-        self.obstacles_circles = [grp for grp in self.obstacles_circles
+        self._is_obstacle_detected_circles = [grp for grp in self._is_obstacle_detected_circles
                                   if grp.best_fit_circle.radius >= self.p_min_obstacle_size]
-
-        # print message if any lines or circles were removed
-        one_or_more_obstacles_removed = len(self.obstacles_lines) < no_of_detected_lines or len(self.obstacles_circles) < no_of_detected_circles
-        # if one_or_more_obstacles_removed:
-            # self.get_logger().info("After removing small obstacles, %d lines and %d circles remain (took %.2f sec)" %
-            #                        (len(self.obstacles_lines), len(self.obstacles_circles), (time.time() - _time)))
 
     def visualize_groups_and_obstacles(self):
         marker_list = []
         dummy_id = 0
 
-        # Groups
-        for grp in self.groups:
-            for pt in grp.points:
-                marker = Marker()
-                marker.id = dummy_id
-                marker.header = self.header
-                marker.type = Marker.SPHERE
-                marker.action = 0  # 0 add/modify an object, 1 (deprecated), 2 deletes an object, 3 deletes all objects
-                marker.color.a = 0.5
-                marker.color.r = 0.0
-                marker.color.g = 0.9
-                marker.color.b = 0.0
-                marker.scale.x = 0.05
-                marker.scale.y = 0.05
-                marker.scale.z = 0.05
-                marker.pose.orientation.x = 0.0
-                marker.pose.orientation.y = 0.0
-                marker.pose.orientation.z = 0.0
-                marker.pose.orientation.w = 1.0
-                marker.pose.position.x = pt.x
-                marker.pose.position.y = pt.y
-                marker.pose.position.z = 0.0
-                marker_list.append(marker)
-                if dummy_id not in self._all_marker_IDs:
-                    self._all_marker_IDs.append(dummy_id)
-                dummy_id += 1
-
-        # # Obstacles represented by lines
-        # for grp in self.obstacles_lines:
-        #     marker = Marker()
-        #     marker.id = dummy_id
-        #     marker.header = self.header
-        #     marker.type = Marker.LINE_STRIP
-        #     marker.action = 0  # 0 add/modify an object, 1 (deprecated), 2 deletes an object, 3 deletes all objects
-        #     marker.color.a = 0.8
-        #     marker.color.r = 1.0
-        #     marker.color.g = 0.0
-        #     marker.color.b = 0.0
-        #     marker.scale.x = 0.05
-        #     marker.points = grp.best_fit_line.endpoints
-        #     marker.points[0].z, marker.points[1].z = 0.035, 0.035  # based on diameter of sphere markers
-        #     marker.pose.orientation.x = 0.0
-        #     marker.pose.orientation.y = 0.0
-        #     marker.pose.orientation.z = 0.0
-        #     marker.pose.orientation.w = 1.0
-        #     marker_list.append(marker)
-        #     if dummy_id not in self._all_marker_IDs:
-        #         self._all_marker_IDs.append(dummy_id)
-        #     dummy_id += 1
-
+      
         # Obstacles represented by circles
-        for grp in self.obstacles_circles:
+        for grp in self._is_obstacle_detected_circles:
             marker = Marker()
             marker.id = dummy_id
             marker.header = self.header
@@ -827,85 +760,105 @@ class Task3(Node):
         return marker_array
 
 
+
+
+    def image_callback(self,msg):
+        
+        try:
+            image = self.bridge.imgmsg_to_cv2(msg)
+            hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+            small_kernel = np.ones((5,5), np.uint8)
+            #range of lower and upper
+            mask = cv2.inRange(hsv,  np.array([0, 0, 0])  , np.array([255, 255, 15])  )
+            check = cv2.morphologyEx(mask, cv2.MORPH_OPEN, small_kernel)
+            contours, _ = cv2.findContours(check, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+            for contour in contours:
+                area = cv2.contourArea(contour)
+                if area > 350000: 
+                    self.get_logger().info("detected")
+                    self.last_detected = True
+                    self._is_obstacle_detected = True
+                    # self.stop()
+                    self.move_ttbot(0.0,0.0)
+                else:
+                    if(self.last_detected):
+                        self.get_logger().info("BHJAAAG MILKAA BHAAG")
+                        self.move_ttbot(0.0, 0.0)
+                        time.sleep(0.25)
+                        self.move_ttbot(0.5,0)
+                        time.sleep(0.25)
+                        self.move_ttbot(0.0, 0.0)
+                        self.last_detected = False
+                        
+                        path,self.node_path = self.a_star_path_planner(self.ttbot_data_pose, self.goal_pose)
+                        self.path_pub.publish(path)
+                    self._is_obstacle_detected = False
+        except CvBridgeError as e:
+            self.get_logger().error(f"Could not convert image: {e}")
+
     def callback_lidar_data(self, laser_scan):
         self.header = laser_scan.header
-        theta = np.arange(laser_scan.angle_min, laser_scan.angle_max, laser_scan.angle_increment)
-        # print("-----------")
-        r = np.array(laser_scan.ranges)
-        # print("Number of samples = %d, resolution = %.4f degree" % (len(theta), laser_scan.angle_increment * 180.0 / np.pi))
-
-        # making sure len(theta) == len(r)  [is this check even required?]
-        if len(theta) != len(r):
-            if len(theta) < len(r):
-                r = r[:len(theta)]  # truncate r
-
-            else:
-                theta = theta[:len(r)]  # truncate theta
-
-
-        # convert points from polar coordinates to cartesian coordinates
-        indices_of_valid_r = [i for i in range(len(r)) if laser_scan.range_min <= r[i] < laser_scan.range_max]
-        r, theta = [r[i] for i in indices_of_valid_r], [theta[i] for i in indices_of_valid_r]
-        self.points = [Point(x=r[i] * np.cos(theta[i]), y=r[i] * np.sin(theta[i]), z=0.0)  # 2D lidar doesn't have Z
-                       for i in range(len(r))]
-
-        if (min(laser_scan.ranges[0:100]+laser_scan.ranges[260:360])<0.30):
+        if (min(laser_scan.ranges[260:270]+laser_scan.ranges[80:100]+laser_scan.ranges[340:360]+laser_scan.ranges[0:20])<0.2 and not self._is_obstacle_detected):
+            print(min(laser_scan.ranges[260:270]+laser_scan.ranges[80:100]+laser_scan.ranges[340:360]+laser_scan.ranges[0:20]))
             print("lidar moving up")
-            self.move_ttbot(-0.5, 0.0)
+            self.move_ttbot(-0.4, 0.0)
             time.sleep(0.25)
             self.move_ttbot(0.0, 0.0)
+            self._is_obstacle_detected = True
 
-        if (min(laser_scan.ranges[145:215])<0.25):
+        if (min(laser_scan.ranges[150:210])<0.25):
             print("lidar moving down")
             
             self.move_ttbot(0.5, 0.0)
             time.sleep(0.25)
             self.move_ttbot(0.0, 0.0)
+            self._is_obstacle_detected = True
 
-        # elif (min(laser_scan.ranges[145:215])<0.25):
-        entered = False
-        self.reset_state()
-        self.detect_obstacles()
-        if(len(self.obstacles_circles) and not self.plan_done):
-            for grp in self.obstacles_circles:
-                # print(grp.best_fit_circle.radius)
-                # return
-                if(grp.best_fit_circle.radius > 0.20 and grp.best_fit_circle.radius < 0.25):
-                    x = grp.best_fit_circle.center.x
-                    y = grp.best_fit_circle.center.y
-                    radius = grp.best_fit_circle.radius
-                    distance_from_robot = np.sqrt(x ** 2 + y ** 2) - radius
-                    # print(self.obstacles)
-                    # print(distance_from_robot)
-                    print(x,y)
-                    # if(x<0.4 and x>0 and abs(y)<0.7):
-                    #     print("right or left")
-                    #     self.obstacles = True
-                    #     self.move_ttbot(-0.2,0)
-                    #     time.sleep(0.2)
-                    if(x>0.6 and x <1.3 and abs(y) <1):
-                        print("obstacle_detected")
-                        self.obstacles = True
-                        self.move_ttbot(0,0)
-                        time.sleep(0.1)
-                        # self.move_ttbot(0.5,0)
-                        # time.sleep(0.4)
-                    elif(x <0.6 and x>-0.6 and abs(y) <1.5):
-                        print("right or left")
-                        self.obstacles = True
-                        self.move_ttbot(0.5,0)
-                        time.sleep(0.2)
-                        # self.move_ttbot(0,0)
-                        # time.sleep(0.1)
-                    else:
-                        self.obstacles = False
 
-        else:
-            self.obstacles = False
-            entered = False
+        # # elif (min(laser_scan.ranges[145:215])<0.25):
+        # entered = False
+        # self.reset_state()
+        # self.detect_obstacles()
+        # if(len(self._is_obstacle_detected_circles) and not self.plan_done):
+        #     for grp in self._is_obstacle_detected_circles:
+        #         # print(grp.best_fit_circle.radius)
+        #         # return
+        #         if(grp.best_fit_circle.radius > 0.20 and grp.best_fit_circle.radius < 0.25):
+        #             x = grp.best_fit_circle.center.x
+        #             y = grp.best_fit_circle.center.y
+        #             radius = grp.best_fit_circle.radius
+        #             distance_from_robot = np.sqrt(x ** 2 + y ** 2) - radius
+        #             print(self._is_obstacle_detected)
+        #             print(distance_from_robot)
+        #             print(x,y)
+        #             if(x<0.4 and x>0 and abs(y)<0.7):
+        #                 print("right or left")
+        #                 self._is_obstacle_detected = True
+        #                 self.move_ttbot(-0.2,0)
+        #                 time.sleep(0.2)
+        #             if(x>0.6 and x <1.3 and abs(y) <1):
+        #                 print("obstacle_detected")
+        #                 self._is_obstacle_detected = True
+        #                 self.move_ttbot(0,0)
+        #                 time.sleep(0.1)
+        #                 # self.move_ttbot(0.5,0)
+        #                 # time.sleep(0.4)
+        #             elif(x <0.6 and x>-0.6 and abs(y) <1.5):
+        #                 print("right or left")
+        #                 self._is_obstacle_detected = True
+        #                 self.move_ttbot(0.5,0)
+        #                 time.sleep(0.2)
+        #                 # self.move_ttbot(0,0)
+        #                 # time.sleep(0.1)
+        #             else:
+        #                 self._is_obstacle_detected = False
+
+        # else:
+        #     self._is_obstacle_detected = False
+        #     entered = False
             
             
-        
+    
         
     
     def __real_world_to_grid(self, data):        
@@ -966,6 +919,11 @@ class Task3(Node):
         @param  end_pose      PoseStamped object containing the end of the path to be created.
         @return path          Path object containing the sequence of waypoints of the created path.
         """
+        self.path = Path()
+        self.path.header = Header()
+        self.path.header.frame_id = "map" 
+        self.last_idx = 0
+        self.idx = 1
         ending = self.__real_world_to_grid(end_pose) #ttbot_pose in string
         starting = self.__real_world_to_grid(start_pose) #ttbot_pose in string
         self.ttbot_pose_tuple = tuple(map(int, starting.split(',')))
@@ -1001,9 +959,9 @@ class Task3(Node):
         return yaw  
     
     def linear_pid(self,error):
-        kp = 4
+        kp = 7
         kd = 1.5
-        ki = 0.0
+        ki = 0.001
         dt = 0.1
         self.lin_int_error += error * dt
         derivative = (error - self.lin_prev_error) / dt
@@ -1011,7 +969,7 @@ class Task3(Node):
         linear_velocity = (kp * error) + (ki * self.lin_int_error) + (kd * derivative)
         if math.isinf(linear_velocity):
             linear_velocity = 0.0
-        linear_velocity = min(max(linear_velocity, 0.0), 0.3)  # Clamp velocity to [0.0, 0.15]
+        linear_velocity = min(max(linear_velocity, 0.0), 0.2)  # Clamp velocity to [0.0, 0.15]
         return linear_velocity
     
     def angular_pid(self,error):
@@ -1023,10 +981,10 @@ class Task3(Node):
         derivative = (error - self.ang_prev_error) / dt
         self.ang_prev_error = error
         ang_vel = (kp * error) + (ki * self.ang_int_error) + (kd * derivative)
-        ang_vel = min(max(ang_vel, 0.0), 0.5)
+        ang_vel = min(max(ang_vel, 0.0), 0.35)
         return ang_vel
     
-    def goal_reached(self, current, target, off=0.30):
+    def goal_reached(self, current, target, off=0.20):
         dx = target.position.x - current.position.x
         dy = target.position.y - current.position.y
         distance = np.sqrt(dx ** 2 + dy ** 2)
@@ -1036,8 +994,11 @@ class Task3(Node):
     def move_ttbot(self, speed, heading):
 
         cmd_velocity = Twist()
+        
         cmd_velocity.linear.x = float(speed)
         cmd_velocity.angular.z = float(heading)
+        
+
         self.cmd_publisher.publish(cmd_velocity)
 
     def normalize_angle(self,angle):
@@ -1073,8 +1034,8 @@ class Task3(Node):
         target_angle = math.atan2(current_goal.pose.position.y - self.ttbot_data_pose.position.y, current_goal.pose.position.x - self.ttbot_data_pose.position.x)
         current_angle = self.get_yaw(self.ttbot_data_pose)  
         yaw_error = self.normalize_angle(target_angle - current_angle)
-        lin_err = 0.3
-        ang_err = 0.3
+        lin_err = 0.2
+        ang_err = 0.15
         self.is_goal_reached = False
         if(abs(yaw_error) > ang_err):
             
@@ -1106,7 +1067,7 @@ class Task3(Node):
             if(self.node_path is not None):
                 while (not self.goal_reached(self.ttbot_data_pose,self.goal_pose)):
                     rclpy.spin_once(self, timeout_sec=0.1)
-                    if(not self.obstacles):
+                    if(not self._is_obstacle_detected):
                         self.idx = self.get_path_idx()
                         print("waypoint no:" + str(self.idx))
                         current_goal = self.path.poses[self.idx]
@@ -1117,7 +1078,7 @@ class Task3(Node):
                             #     self.is_goal_reached = True
                             #     # continue
                             rclpy.spin_once(self, timeout_sec=0.1)
-                            if(self.obstacles):
+                            if(self._is_obstacle_detected):
                                 self.is_goal_reached = True
                                 print("skipping")
                                 continue
