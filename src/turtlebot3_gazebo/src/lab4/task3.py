@@ -25,7 +25,6 @@ from PIL import  ImageOps
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 from graphviz import Graph
-from tf_transformations import euler_from_quaternion
 from nav_msgs.msg import Path
 from std_msgs.msg import Header
 import heapq
@@ -446,6 +445,7 @@ class Task3(Node):
         self.p_min_obstacle_size = self.get_parameter('p_min_obstacle_size').value
 
         self.header = None
+        self.img_pub = self.create_publisher(Image, 'video_data', 10)      
 
         # Initialize some empty lists
         self.points = []  # cartesian points (XY coordinates)
@@ -774,25 +774,19 @@ class Task3(Node):
             contours, _ = cv2.findContours(check, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
             for contour in contours:
                 area = cv2.contourArea(contour)
-                if area > 350000: 
+                if area > 450000: 
                     self.get_logger().info("detected")
-                    self.last_detected = True
                     self._is_obstacle_detected = True
                     # self.stop()
                     self.move_ttbot(0.0,0.0)
-                else:
-                    if(self.last_detected):
-                        self.get_logger().info("BHJAAAG MILKAA BHAAG")
-                        self.move_ttbot(0.0, 0.0)
-                        time.sleep(0.25)
-                        self.move_ttbot(0.5,0)
-                        time.sleep(0.25)
-                        self.move_ttbot(0.0, 0.0)
-                        self.last_detected = False
-                        
-                        path,self.node_path = self.a_star_path_planner(self.ttbot_data_pose, self.goal_pose)
-                        self.path_pub.publish(path)
+                else:  
+                    print("NOT")                      
                     self._is_obstacle_detected = False
+                cv2.putText(check, str(area), (200, 1000), cv2.FONT_HERSHEY_SIMPLEX, 3, (255, 255, 255), 5 , cv2.LINE_AA)
+                # cv2.imshow("Mask", check)
+                self.img_pub.publish(self.bridge.cv2_to_imgmsg(check))
+
+                
         except CvBridgeError as e:
             self.get_logger().error(f"Could not convert image: {e}")
 
@@ -804,62 +798,15 @@ class Task3(Node):
             self.move_ttbot(-0.4, 0.0)
             time.sleep(0.25)
             self.move_ttbot(0.0, 0.0)
-            self._is_obstacle_detected = True
+            # self._is_obstacle_detected = True
 
-        if (min(laser_scan.ranges[150:210])<0.25):
+        if (min(laser_scan.ranges[150:210])<0.20):
             print("lidar moving down")
-            
+            # self._is_obstacle_detected = False
             self.move_ttbot(0.5, 0.0)
             time.sleep(0.25)
             self.move_ttbot(0.0, 0.0)
-            self._is_obstacle_detected = True
-
-
-        # # elif (min(laser_scan.ranges[145:215])<0.25):
-        # entered = False
-        # self.reset_state()
-        # self.detect_obstacles()
-        # if(len(self._is_obstacle_detected_circles) and not self.plan_done):
-        #     for grp in self._is_obstacle_detected_circles:
-        #         # print(grp.best_fit_circle.radius)
-        #         # return
-        #         if(grp.best_fit_circle.radius > 0.20 and grp.best_fit_circle.radius < 0.25):
-        #             x = grp.best_fit_circle.center.x
-        #             y = grp.best_fit_circle.center.y
-        #             radius = grp.best_fit_circle.radius
-        #             distance_from_robot = np.sqrt(x ** 2 + y ** 2) - radius
-        #             print(self._is_obstacle_detected)
-        #             print(distance_from_robot)
-        #             print(x,y)
-        #             if(x<0.4 and x>0 and abs(y)<0.7):
-        #                 print("right or left")
-        #                 self._is_obstacle_detected = True
-        #                 self.move_ttbot(-0.2,0)
-        #                 time.sleep(0.2)
-        #             if(x>0.6 and x <1.3 and abs(y) <1):
-        #                 print("obstacle_detected")
-        #                 self._is_obstacle_detected = True
-        #                 self.move_ttbot(0,0)
-        #                 time.sleep(0.1)
-        #                 # self.move_ttbot(0.5,0)
-        #                 # time.sleep(0.4)
-        #             elif(x <0.6 and x>-0.6 and abs(y) <1.5):
-        #                 print("right or left")
-        #                 self._is_obstacle_detected = True
-        #                 self.move_ttbot(0.5,0)
-        #                 time.sleep(0.2)
-        #                 # self.move_ttbot(0,0)
-        #                 # time.sleep(0.1)
-        #             else:
-        #                 self._is_obstacle_detected = False
-
-        # else:
-        #     self._is_obstacle_detected = False
-        #     entered = False
-            
-            
-    
-        
+            # self._is_obstacle_detected = True
     
     def __real_world_to_grid(self, data):        
         
@@ -952,15 +899,31 @@ class Task3(Node):
                 'No new plan'   )
             node_path = 0
     
+    def euler_from_quaternion(self,quaternion):
+        """Convert quaternion to euler roll, pitch, yaw."""
+        x, y, z, w = quaternion.x, quaternion.y, quaternion.z, quaternion.w
+        sinr_cosp = 2 * (w * x + y * z)
+        cosr_cosp = 1 - 2 * (x * x + y * y)
+        roll = np.arctan2(sinr_cosp, cosr_cosp)
+
+        sinp = 2 * (w * y - z * x)
+        pitch = np.arcsin(sinp)
+
+        siny_cosp = 2 * (w * z + x * y)
+        cosy_cosp = 1 - 2 * (y * y + z * z)
+        yaw = np.arctan2(siny_cosp, cosy_cosp)
+
+        return roll, pitch, yaw
+
     def get_yaw(self, pose):
         orientation = pose.orientation
         quaternion = (orientation.x, orientation.y, orientation.z, orientation.w)
-        roll, pitch, yaw = euler_from_quaternion(quaternion)
+        roll, pitch, yaw = self.euler_from_quaternion(orientation)
         return yaw  
     
     def linear_pid(self,error):
         kp = 7
-        kd = 1.5
+        kd = 3
         ki = 0.001
         dt = 0.1
         self.lin_int_error += error * dt
@@ -969,19 +932,19 @@ class Task3(Node):
         linear_velocity = (kp * error) + (ki * self.lin_int_error) + (kd * derivative)
         if math.isinf(linear_velocity):
             linear_velocity = 0.0
-        linear_velocity = min(max(linear_velocity, 0.0), 0.2)  # Clamp velocity to [0.0, 0.15]
+        linear_velocity = min(max(linear_velocity, 0.0), 0.4)  # Clamp velocity to [0.0, 0.15]
         return linear_velocity
     
     def angular_pid(self,error):
         kp = 7
-        kd = 1.5
+        kd = 12
         ki = 0.01
         dt = 0.1
         self.ang_int_error += error * dt
         derivative = (error - self.ang_prev_error) / dt
         self.ang_prev_error = error
         ang_vel = (kp * error) + (ki * self.ang_int_error) + (kd * derivative)
-        ang_vel = min(max(ang_vel, 0.0), 0.35)
+        ang_vel = min(max(ang_vel, 0.0), 0.3)
         return ang_vel
     
     def goal_reached(self, current, target, off=0.20):
@@ -1034,16 +997,16 @@ class Task3(Node):
         target_angle = math.atan2(current_goal.pose.position.y - self.ttbot_data_pose.position.y, current_goal.pose.position.x - self.ttbot_data_pose.position.x)
         current_angle = self.get_yaw(self.ttbot_data_pose)  
         yaw_error = self.normalize_angle(target_angle - current_angle)
-        lin_err = 0.2
-        ang_err = 0.15
+        lin_err = 0.1
+        ang_err = 0.20
         self.is_goal_reached = False
         if(abs(yaw_error) > ang_err):
-            
-            self.speed = 0.01
+            print("yaw_error"+str(yaw_error))
+            self.speed = 0.1*self.distance_to_goal
             self.heading = self.angular_pid(abs(yaw_error)) if yaw_error > 0 else -self.angular_pid(abs(yaw_error))
         elif ((self.distance_to_goal > lin_err)): 
             self.speed = self.linear_pid(self.distance_to_goal)
-            self.heading = 0
+            self.heading = 0.1*yaw_error
         else: 
             self.is_goal_reached = True
             self.speed = 0
