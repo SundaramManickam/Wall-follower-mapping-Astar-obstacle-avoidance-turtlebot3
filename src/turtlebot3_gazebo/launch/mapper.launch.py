@@ -37,14 +37,14 @@ def generate_launch_description():
                               'slam_params_file': slam_params_file}.items()
         ),
 
-        # # Launch your mapping algorithm
-        # Node(
-        #     package='turtlebot3_gazebo',
-        #     executable='task1.py',
-        #     name='task1_algorithm',
-        #     output='screen',
-        #     parameters=[{
-        #         'use_sim_time': LaunchConfiguration('use_sim_time')
-        #     }]
-        # ),
+        # Launch your mapping algorithm
+        Node(
+            package='turtlebot3_gazebo',
+            executable='task1.py',
+            name='task1_algorithm',
+            output='screen',
+            parameters=[{
+                'use_sim_time': LaunchConfiguration('use_sim_time')
+            }]
+        ),
     ])
