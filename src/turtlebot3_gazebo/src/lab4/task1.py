@@ -30,13 +30,6 @@ class Task1(Node):
             self.odom_callback,
             10
         )
-        # self.amcl_pose_subscriber = self.create_subscription(
-        #     PoseWithCovarianceStamped,
-        #     '/amcl_pose',
-        #     self.amcl_pose_callback,
-        #     10
-        # )
-
         # Publisher
         self.cmd_vel_publisher = self.create_publisher(
             Twist,
@@ -56,14 +49,12 @@ class Task1(Node):
         self.ang_side_prev_error = 0
         self.lin_int_error = 0
         self.lin_prev_error = 0
-        # State Variables
         self.scan_data = None
         self.ttbot_data_pose = Pose()
         self.yaw = 0.0
-        self.state = 'FINDING_WALL'  # States: FINDING_WALL, ALIGNING_WITH_WALL, FOLLOWING_WALL, CORRECTING_PATH
+        self.state = 'FINDING_WALL'  # States: FINDING_WALL, FOLLOWING_WALL, CORRECTING_PATH
         self.is_right = False
         self.destination_yaw = 0.0
-        # Control Parameters
         self.forward_speed = 0.2
         self.turn_speed = 0.1
         self.wall_stop_distance = 0.7  # Desired distance from the wall
@@ -102,7 +93,7 @@ class Task1(Node):
         linear_velocity = (kp * error) + (ki * self.lin_int_error) + (kd * derivative)
         if math.isinf(linear_velocity):
             linear_velocity = 0.0
-        linear_velocity = max(min(linear_velocity, 0.2), -0.1)# Clamp velocity to [0.0, 0.15]
+        linear_velocity = max(min(linear_velocity, 0.25), -0.1)# Clamp velocity to [0.0, 0.15]
         return linear_velocity
     
     def alignment_pid(self,error):
@@ -141,12 +132,10 @@ class Task1(Node):
     def set_destination_yaw(self,delta_angle):
         """Set a new destination yaw relative to the current yaw."""
         self.destination_yaw = self.normalize_angle(self.yaw + delta_angle)
-        # print("destination_yaw" + str(self.destination_yaw))
 
     def get_yaw(self, orientation):
         quaternion = (orientation.x, orientation.y, orientation.z, orientation.w)
         roll, pitch, self.yaw = euler_from_quaternion(quaternion)
-        # print(self.yaw)
     
 
     def weighted_median(self,data, weights):
@@ -171,43 +160,20 @@ class Task1(Node):
         
         if not self.scan_data:
             self.get_logger().warning("Scan data not available.")
-            return
-        # print(self.scan_data[0])
-        # return
+            return  
         twist = Twist()
-        # front_distance = self.scan_data[0]
-        # if(math.isinf(front_distance)):
-        #     front_distance = 11
-        # self.distance_error = front_distance - self.wall_stop_distance
-
         front_indices = list(range(350, 359)) + list(range(0, 10))  # Indices for -10° to 10°
         front_high_indices = list(range(0, 35) )+ list(range(315, 359))   # Indices for -25° to 25°
-        
         valid_distances = [self.scan_data[i] if not math.isinf(self.scan_data[i]) else 11 for i in front_indices]
-        valid_high_distances = [(self.scan_data[i], i) if not math.isinf(self.scan_data[i]) else (11, i)for i in front_high_indices]
-
-        
-        
-        
-        # Threshold for stopping the robot
-        threshold_distance = 0.3  # Example threshold distance
-
-        
+        valid_high_distances = [(self.scan_data[i], i) if not math.isinf(self.scan_data[i]) else (11, i)for i in front_high_indices] 
+        threshold_distance = 0.3  #  threshold distance
         front_distance = min(valid_distances)
         min_front_distance, min_index = min(valid_high_distances, key=lambda x: x[0])
-
-
-        
-            
 
         # Compute the distance error
         self.distance_error = front_distance - self.wall_stop_distance
         
-
         if self.state == 'FINDING_WALL':
-            # Move forward to find the nearest wall
-            # for i in range(-10,0):
-            #     front_distance[i] = self.scan_data[i+360]  # 0° corresponds to front
             
             if self.distance_error <=0.05:
                 self.get_logger().warn("Wall ---- ROTATE.")
@@ -221,30 +187,14 @@ class Task1(Node):
                 
         elif self.state == 'ROTATE':
             yaw_error = self.normalize_angle(self.destination_yaw - self.yaw)
-            # yaw_error = 0
-            
-            right_avg = sum(self.scan_data[266:271]) / 5  # Average for left half]
+            right_avg = sum(self.scan_data[266:271]) / 5  # Average for left half
             left_avg = sum(self.scan_data[271:276]) / 5  # Average for right half
             alignment_error = left_avg - right_avg  # Positive = closer to right wall
             if( math.isinf(right_avg) or math.isinf(left_avg)):
-                # self.get_logger().warn("INF just .")
                 alignment_error =0
-            # Calculate offset error
-            # print("this is allignment error while rotating" + str(alignment_error))
-            # print("this is distance error while rotating" + str(self.distance_error))
-            
-            # print(yaw_error)
-            # is_side_looking_at_wall = (right_avg - self.wall_stop_distance <0.05 and left_avg - self.wall_stop_distance <0.05)
+                
             if (abs(yaw_error) + abs(alignment_error) <= 0.07 or (abs(alignment_error)<=0.07 and abs(yaw_error)<0.7 and not self.is_right)):  # Close enough to the target angle
                 
-                
-                #     print("sleep")
-                #     time.sleep(0.5)
-                # if(self.destination_yaw>0):
-                #     print("sleep")
-                # #     self.move_forward()
-                #     time.sleep(0.5)
-                #     print("sleep over")
                 self.get_logger().warn("ROTATE - ALIGNING_WITH_WALL")
                 self.state = 'FOLLOWING_WALL'
                 self.ang_int_error = 0
@@ -254,59 +204,18 @@ class Task1(Node):
                 self.lin_int_error = 0
                 self.lin_prev_error = 0
             else:
-                # self.get_logger().warn("ROTATE")
                 
-                # twist.angular.z = self.alignment_pid(abs(yaw_error+0.6*(alignment_error))) if (yaw_error+alignment_error) > 0 else -self.alignment_pid(abs(yaw_error+0.6*(alignment_error)))
                 twist.angular.z = self.alignment_pid(abs(yaw_error)) if (yaw_error) > 0 else -self.alignment_pid(abs(yaw_error))
-                
-                # twist.linear.x =self.linear_pid(max(min(self.distance_error, 0.35), -0.35))
                 twist.linear.x =self.linear_pid(self.distance_error)
                 if(twist.angular.z >0.35 or twist.angular.z <-0.35):
                     twist.linear.x= twist.linear.x*0.7
-                # print(min_front_distance)
-                # print(min_index)
                 if(min_front_distance<threshold_distance):
                     self.get_logger().info(".............................................reversing")
-                    # print(min_front_distance)
                     twist.linear.x = -0.05
                     twist.angular.z = 0.0
-                    # if( min_index in range(0,35)):
-                    #     self.get_logger().info(".............................................clockwise")
-                    #     # twist.angular.z = 0.08
-                    # else:
-                    #     self.get_logger().info(".............................................anticlockwise")
-                    #     # twist.angular.z = -0.08
                 else:
                     if(self.is_right):
                         twist.linear.x = 0.2       
-
-                   
-        # elif self.state == 'ALIGNING_WITH_WALL':
-        #     # Use side LIDAR data to align with the wall
-            
-        #     right_avg = sum(self.scan_data[266:271]) / 5  # Average for left half]
-        #     left_avg = sum(self.scan_data[271:276]) / 5  # Average for right half
-            
-        #     # Calculate offset error
-        #     alignment_error = left_avg - right_avg  # Positive = closer to right wall
-        #     if( math.isinf(right_avg) or math.isinf(left_avg)):
-        #         self.get_logger().warn("ALIGNING_WITH_WALL - FOLLOWING_WALL.")
-        #         self.state='FOLLOWING_WALL'
-        #         alignment_error =0
-            
-
-        #     if abs(alignment_error) <= 0.05:  # Threshold for alignment
-        #         self.get_logger().warn("Aligned with wall. Switching to FOLLOWING_WALL.")
-        #         self.state = 'FOLLOWING_WALL'
-        #     else:
-        #         # Rotate left or right based on alignment error
-        #         twist = Twist()
-        #         # self.get_logger().warn("ALIGHNING WITH WALL")
-                
-        #         twist.angular.z = self.alignment_pid(abs(alignment_error)) if alignment_error > 0 else -self.alignment_pid(abs(alignment_error))
-        #         twist.linear.x = self.linear_pid(max(min(self.distance_error, 0.2), -0.2))  # Stop forward motion during alignment
-        #         if(twist.angular.z >0.2 or twist.angular.z <-0.2):
-        #             twist.linear.x= twist.linear.x*1
 
         elif self.state == 'FOLLOWING_WALL':
             # Maintain wall on the right side
@@ -323,14 +232,9 @@ class Task1(Node):
             #allignment error#####
             right_avg = sum(self.scan_data[266:271]) / 5  # Average for left half]
             left_avg = sum(self.scan_data[271:276]) / 5  # Average for right half
-                        # Calculate offset error
             alignment_error =  left_avg - right_avg   # Positive = closer to right wall
-            # right_distance = avg(self.scan_data[266:276])
-            # print(right_distance)
             if( math.isinf(right_avg) or math.isinf(left_avg)):
-                # self.get_logger().warn("INF just.")
                 alignment_error =  0  # Positive = closer to right wall
-
 
             # self.get_logger().warn(f"Alignment Error: {alignment_error:.2f}")
             # self.get_logger().warn(f"Side Distance Error: {side_distance_error:.2f}")
@@ -350,6 +254,8 @@ class Task1(Node):
                 self.lin_prev_error = 0
             elif ((right_avg+left_avg)/2 > self.wall_stop_distance+0.5):  # Wall opening detected
                 self.get_logger().warn("OPENING")
+                avg = (right_avg+left_avg)/2
+                self.get_logger().info(f"right {avg:.2f}")
                 self.state = 'ROTATE'
                 self.is_right = True
                 self.set_destination_yaw(-math.pi / 2)  # Turn 90° right
@@ -362,32 +268,16 @@ class Task1(Node):
             else:
                 angular_correction = -self.alignment_pid(abs(alignment_error)) if alignment_error > 0 else self.alignment_pid(abs(alignment_error))
                 side_correction = -self.side_distance_pid(abs(side_distance_error)) if side_distance_error > 0 else self.side_distance_pid(abs(side_distance_error))
-                # print("SIDE_CORRECTION" + str(side_correction))
-                # twist.angular.z = self.alignment_pid(abs(yaw_error+alignment_error)) if yaw_error+alignment_error > 0 else -self.alignment_pid(abs(yaw_error+alignment_error))
                 twist.angular.z = (angular_correction + side_correction)
-                # print(min_front_distance)
-                # print(min_index)
-                # print("min_front" + str(min_front_distance))
                 if(min_front_distance<threshold_distance):
                     self.get_logger().info("...........................reversing")
-                    # print(min_front_distance)
                     twist.linear.x = -0.05
-                    # twist.angular.z = 0.0
-                    # if( min_index in range(0,35)):
-                    #     twist.angular.z = 0.08
-                    # else:
-                    #     twist.angular.z = -0.08
                     
                 else:
                     twist.linear.x = self.linear_pid(self.distance_error)
                     if(twist.angular.z >0.2 or twist.angular.z <-0.2):
                         twist.linear.x= twist.linear.x/2
                     
-        # print("angular speed:"+str(twist.angular.z))
-        # print("linear speed:"+str(twist.linear.x))
-                
-
-
         self.cmd_vel_publisher.publish(twist)
 
 
