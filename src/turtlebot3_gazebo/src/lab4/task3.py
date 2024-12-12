@@ -958,7 +958,7 @@ class Task3(Node):
         ang_vel = min(max(ang_vel, 0.0), 0.3)
         return ang_vel
     
-    def goal_reached(self, current, target, off=0.20):
+    def goal_reached(self, current, target, off=0.45):
         dx = target.position.x - current.position.x
         dy = target.position.y - current.position.y
         distance = np.sqrt(dx ** 2 + dy ** 2)
