@@ -19,211 +19,203 @@ class Nodes:
 def rewire(node_list, new_node, radius,img):
     """Rewire the tree to ensure optimal connections"""
     for i in range(len(node_list)):
-        dist, _ = dist_and_angle(node_list[i].x, node_list[i].y, new_node.x, new_node.y)
-        if dist < radius and not collision(new_node.x, new_node.y, node_list[i].x, node_list[i].y,img):
+        dist, _ = calculate_distance_angle(node_list[i].x, node_list[i].y, new_node.x, new_node.y)
+        if dist < radius and not detect_collision(new_node.x, new_node.y, node_list[i].x, node_list[i].y,img):
             new_cost = new_node.cost + dist
             if new_cost < node_list[i].cost:
                 node_list[i].cost = new_cost
                 node_list[i].parent_x = new_node.parent_x.copy()
                 node_list[i].parent_y = new_node.parent_y.copy()
 
-def collision(x1, y1, x2, y2, img):
-    color = []
-    x = np.linspace(x1, x2, num=100)
-    y = np.linspace(y1, y2, num=100)
+def detect_collision(x_start, y_start, x_end, y_end, image):
+    pixel_colors = []
+    x_coords = np.linspace(x_start, x_end, num=100)
+    y_coords = np.linspace(y_start, y_end, num=100)
 
-    for i in range(len(x)):
-        ix, iy = int(round(x[i])), int(round(y[i]))
-        if 0 <= ix < img.shape[1] and 0 <= iy < img.shape[0]:
-            pixel_value = img[iy, ix]
+    for index in range(len(x_coords)):
+        x_pix, y_pix = int(round(x_coords[index])), int(round(y_coords[index]))
+        if 0 <= x_pix < image.shape[1] and 0 <= y_pix < image.shape[0]:
+            current_pixel = image[y_pix, x_pix]
             # Check for black (occupied) or gray (unknown)
-            if pixel_value == 0 or (10 <= pixel_value <= 220):  # Adjust thresholds for gray
+            if current_pixel == 0 or (10 <= current_pixel <= 220):  # Adjust thresholds for gray
                 return True  # Collision detected
     return False  # No collision
 
+# Evaluate collision with obstacle and adjust
 
-# check the  collision with obstacle and trim
-def check_collision(x1,y1,x2,y2,img):
-    _,theta = dist_and_angle(x2,y2,x1,y1)
-    x=x2 + stepSize*np.cos(theta)
-    y=y2 + stepSize*np.sin(theta)
-    print(x2,y2,x1,y1)
-    print("theta",theta)
-    print("check_collision",x,y)
+def evaluate_collision(x_initial, y_initial, x_target, y_target, image):
+    _, angle = calculate_distance_angle(x_target, y_target, x_initial, y_initial)
+    next_x = x_target + stepSize * np.cos(angle)
+    next_y = y_target + stepSize * np.sin(angle)
+    print(x_target, y_target, x_initial, y_initial)
+    print("Angle:", angle)
+    print("Next Point:", next_x, next_y)
 
-    # TODO: trim the branch if its going out of image area
-    # print("Image shape",img.shape)
-    hy,hx=img.shape
-    if y<0 or y>hy or x<0 or x>hx:
-        print("Point out of image bound")
-        directCon = False
-        nodeCon = False
+    # Ensure the point stays within image boundaries
+    height, width = image.shape
+    if next_y < 0 or next_y > height or next_x < 0 or next_x > width:
+        print("Point is out of bounds")
+        direct_connection = False
+        node_connection = False
     else:
-        # check direct connection
-        if collision(x,y,end[0],end[1],img):
-            directCon = False
+        # Evaluate direct connection to endpoint
+        if detect_collision(next_x, next_y, end[0], end[1], image):
+            direct_connection = False
         else:
-            directCon=True
+            direct_connection = True
 
-        # check connection between two nodes
-        if collision(x,y,x2,y2,img):
-            nodeCon = False
+        # Evaluate connection between intermediate nodes
+        if detect_collision(next_x, next_y, x_target, y_target, image):
+            node_connection = False
         else:
-            nodeCon = True
+            node_connection = True
 
-    return(x,y,directCon,nodeCon)
+    return (next_x, next_y, direct_connection, node_connection)
 
-# return dist and angle b/w new point and nearest node
-def dist_and_angle(x1,y1,x2,y2):
-    dist = math.sqrt( ((x1-x2)**2)+((y1-y2)**2) )
-    angle = math.atan2(y2-y1, x2-x1)
-    return(dist,angle)
+# Calculate distance and angle between two points
+def calculate_distance_angle(x_a, y_a, x_b, y_b):
+    distance = math.sqrt(((x_a - x_b) ** 2) + ((y_a - y_b) ** 2))
+    angle = math.atan2(y_b - y_a, x_b - x_a)
+    return (distance, angle)
 
-# return the neaerst node index
-def nearest_node(x,y):
-    temp_dist=[]
-    for i in range(len(node_list)):
-        dist,_ = dist_and_angle(x,y,node_list[i].x,node_list[i].y)
-        temp_dist.append(dist)
-    return temp_dist.index(min(temp_dist))
+# Identify the nearest node index
+def find_nearest_node(x_pos, y_pos):
+    distances = []
+    for node in node_list:
+        distance, _ = calculate_distance_angle(x_pos, y_pos, node.x, node.y)
+        distances.append(distance)
+    return distances.index(min(distances))
 
-# generate a random point in the image space
-def rnd_point(h,l):
-    new_y = random.randint(0, h)
-    new_x = random.randint(0, l)
-    return (new_x,new_y)
+# Generate a random point within image bounds
+def generate_random_point(height, width):
+    rand_y = random.randint(0, height)
+    rand_x = random.randint(0, width)
+    return (rand_x, rand_y)
 
-def RRT_star(img, img2, start, end, stepSize, radius):
-    h, l = img.shape
-    node_list[0] = Nodes(start[0], start[1])
-    node_list[0].cost = 0  # Starting node has zero cost
-    node_list[0].parent_x.append(start[0])
-    node_list[0].parent_y.append(start[1])
+# Rapidly-exploring Random Tree algorithm
+def RRT(image, image_copy, start_point, goal_point, step_size):
+    height, width = image.shape
+    node_list[0] = Nodes(start_point[0], start_point[1])
+    node_list[0].parent_x.append(start_point[0])
+    node_list[0].parent_y.append(start_point[1])
 
-    cv2.circle(img2, (start[0], start[1]), 5, (0, 0, 255), thickness=3, lineType=8)
-    cv2.circle(img2, (end[0], end[1]), 5, (0, 0, 255), thickness=3, lineType=8)
+    # Display start and goal points
+    cv2.circle(image_copy, (start_point[0], start_point[1]), 5, (0, 0, 255), thickness=3, lineType=8)
+    cv2.circle(image_copy, (goal_point[0], goal_point[1]), 5, (0, 0, 255), thickness=3, lineType=8)
 
     i = 1
-    pathFound = False
-    while not pathFound:
-        nx, ny = rnd_point(h, l)
-        nearest_ind = nearest_node(nx, ny)
-        nearest_x = node_list[nearest_ind].x
-        nearest_y = node_list[nearest_ind].y
+    path_found = False
+    while not path_found:
+        rand_x, rand_y = generate_random_point(height, width)
+        print("Random points:", rand_x, rand_y)
 
-        tx, ty, directCon, nodeCon = check_collision(nx, ny, nearest_x, nearest_y,img)
-        if nodeCon:
-            new_node = Nodes(tx, ty)
-            new_node.parent_x = node_list[nearest_ind].parent_x.copy()
-            new_node.parent_y = node_list[nearest_ind].parent_y.copy()
-            new_node.parent_x.append(tx)
-            new_node.parent_y.append(ty)
-            new_node.cost = node_list[nearest_ind].cost + stepSize
-            node_list.append(new_node)
+        nearest_index = find_nearest_node(rand_x, rand_y)
+        nearest_x = node_list[nearest_index].x
+        nearest_y = node_list[nearest_index].y
+        print("Nearest node coordinates:", nearest_x, nearest_y)
 
-            cv2.circle(img2, (int(tx), int(ty)), 2, (0, 0, 255), thickness=3, lineType=8)
-            cv2.line(img2, (int(tx), int(ty)), (int(nearest_x), int(nearest_y)), (0, 255, 0), thickness=1, lineType=8)
+        # Check direct connection
+        new_x, new_y, direct_connection, node_connection = evaluate_collision(rand_x, rand_y, nearest_x, nearest_y, image)
+        print("Check collision:", new_x, new_y, direct_connection, node_connection)
 
-            # Rewire
-            rewire(node_list, new_node, radius,img)
-
-            # Check direct connection to the end
-            if not collision(tx, ty, end[0], end[1],img):
-                pathFound = True
-                cv2.line(img2, (int(tx), int(ty)), (end[0], end[1]), (255, 0, 0), thickness=2, lineType=8)
-                final_node = Nodes(end[0], end[1])
-                final_node.parent_x = new_node.parent_x.copy()
-                final_node.parent_y = new_node.parent_y.copy()
-                final_node.parent_x.append(end[0])
-                final_node.parent_y.append(end[1])
-                node_list.append(final_node)
-
-                for j in range(len(final_node.parent_x) - 1):
-                    cv2.line(img2, 
-                             (int(final_node.parent_x[j]), int(final_node.parent_y[j])),
-                             (int(final_node.parent_x[j + 1]), int(final_node.parent_y[j + 1])),
-                             (255, 0, 0), thickness=2, lineType=8)
-
-                cv2.imwrite("out_star.jpg", img2)
-                break
-
-    return
-
-def RRT(img, img2, start, end, stepSize):
-    h,l= img.shape # dim of the loaded image
-    # print(img.shape) # (384, 683)
-    # print(h,l)
-
-    # insert the starting point in the node class
-    # node_list = [0] # list to store all the node points         
-    node_list[0] = Nodes(start[0],start[1])
-    node_list[0].parent_x.append(start[0])
-    node_list[0].parent_y.append(start[1])
-
-    # display start and end
-    cv2.circle(img2, (start[0],start[1]), 5,(0,0,255),thickness=3, lineType=8)
-    cv2.circle(img2, (end[0],end[1]), 5,(0,0,255),thickness=3, lineType=8)
-
-    i=1
-    pathFound = False
-    while pathFound==False:
-        nx,ny = rnd_point(h,l)
-        print("Random points:",nx,ny)
-
-        nearest_ind = nearest_node(nx,ny)
-        nearest_x = node_list[nearest_ind].x
-        nearest_y = node_list[nearest_ind].y
-        print("Nearest node coordinates:",nearest_x,nearest_y)
-
-        #check direct connection
-        tx,ty,directCon,nodeCon = check_collision(nx,ny,nearest_x,nearest_y,img)
-        print("Check collision:",tx,ty,directCon,nodeCon)
-
-        if directCon and nodeCon:
-            print("Node can connect directly with end")
+        if direct_connection and node_connection:
+            print("Node can connect directly with goal")
             node_list.append(i)
-            node_list[i] = Nodes(tx,ty)
-            node_list[i].parent_x = node_list[nearest_ind].parent_x.copy()
-            node_list[i].parent_y = node_list[nearest_ind].parent_y.copy()
-            node_list[i].parent_x.append(tx)
-            node_list[i].parent_y.append(ty)
+            node_list[i] = Nodes(new_x, new_y)
+            node_list[i].parent_x = node_list[nearest_index].parent_x.copy()
+            node_list[i].parent_y = node_list[nearest_index].parent_y.copy()
+            node_list[i].parent_x.append(new_x)
+            node_list[i].parent_y.append(new_y)
 
-            cv2.circle(img2, (int(tx),int(ty)), 2,(0,0,255),thickness=3, lineType=8)
-            cv2.line(img2, (int(tx),int(ty)), (int(node_list[nearest_ind].x),int(node_list[nearest_ind].y)), (0,255,0), thickness=1, lineType=8)
-            cv2.line(img2, (int(tx),int(ty)), (end[0],end[1]), (255,0,0), thickness=2, lineType=8)
+            cv2.circle(image_copy, (int(new_x), int(new_y)), 2, (0, 0, 255), thickness=3, lineType=8)
+            cv2.line(image_copy, (int(new_x), int(new_y)), (int(node_list[nearest_index].x), int(node_list[nearest_index].y)), (0, 255, 0), thickness=1, lineType=8)
+            cv2.line(image_copy, (int(new_x), int(new_y)), (goal_point[0], goal_point[1]), (255, 0, 0), thickness=2, lineType=8)
 
             print("Path has been found")
-            #print("parent_x",node_list[i].parent_x)
-            for j in range(len(node_list[i].parent_x)-1):
-                cv2.line(img2, (int(node_list[i].parent_x[j]),int(node_list[i].parent_y[j])), (int(node_list[i].parent_x[j+1]),int(node_list[i].parent_y[j+1])), (255,0,0), thickness=2, lineType=8)
-            # cv2.waitKey(1)
-            cv2.imwrite("media/"+str(i)+".jpg",img2)
-            cv2.imwrite("out.jpg",img2)
+            for j in range(len(node_list[i].parent_x) - 1):
+                cv2.line(image_copy, (int(node_list[i].parent_x[j]), int(node_list[i].parent_y[j])), (int(node_list[i].parent_x[j + 1]), int(node_list[i].parent_y[j + 1])), (255, 0, 0), thickness=2, lineType=8)
+            # cv2.imwrite("media/" + str(i) + ".jpg", image_copy)
+            cv2.imwrite("rrt.jpg", image_copy)
             break
 
-        elif nodeCon:
+        elif node_connection:
             print("Nodes connected")
             node_list.append(i)
-            node_list[i] = Nodes(tx,ty)
-            node_list[i].parent_x = node_list[nearest_ind].parent_x.copy()
-            node_list[i].parent_y = node_list[nearest_ind].parent_y.copy()
-            # print(i)
-            # print(node_list[nearest_ind].parent_y)
-            node_list[i].parent_x.append(tx)
-            node_list[i].parent_y.append(ty)
-            i=i+1
-            # display
-            cv2.circle(img2, (int(tx),int(ty)), 2,(0,0,255),thickness=3, lineType=8)
-            cv2.line(img2, (int(tx),int(ty)), (int(node_list[nearest_ind].x),int(node_list[nearest_ind].y)), (0,255,0), thickness=1, lineType=8)
-            cv2.imwrite("media/"+str(i)+".jpg",img2)
-            cv2.imshow("sdc",img2)
+            node_list[i] = Nodes(new_x, new_y)
+            node_list[i].parent_x = node_list[nearest_index].parent_x.copy()
+            node_list[i].parent_y = node_list[nearest_index].parent_y.copy()
+            node_list[i].parent_x.append(new_x)
+            node_list[i].parent_y.append(new_y)
+            i += 1
+
+            # Display
+            cv2.circle(image_copy, (int(new_x), int(new_y)), 2, (0, 0, 255), thickness=3, lineType=8)
+            cv2.line(image_copy, (int(new_x), int(new_y)), (int(node_list[nearest_index].x), int(node_list[nearest_index].y)), (0, 255, 0), thickness=1, lineType=8)
+            # cv2.imwrite("media/" + str(i) + ".jpg", image_copy)
+            cv2.imshow("sdc", image_copy)
             cv2.waitKey(1)
             continue
 
         else:
-            print("No direct con. and no node con. :( Generating new rnd numbers")
+            print("No direct connection and no node connection. Generating new random points.")
             continue
-        
+
+def RRT_star(image, image_display, start_point, end_point, step_size, search_radius):
+    height, width = image.shape
+    node_list[0] = Nodes(start_point[0], start_point[1])
+    node_list[0].cost = 0  # Starting node has zero cost
+    node_list[0].parent_x.append(start_point[0])
+    node_list[0].parent_y.append(start_point[1])
+
+    cv2.circle(image_display, (start_point[0], start_point[1]), 5, (0, 0, 255), thickness=3, lineType=8)
+    cv2.circle(image_display, (end_point[0], end_point[1]), 5, (0, 0, 255), thickness=3, lineType=8)
+
+    index = 1
+    path_found = False
+    while not path_found:
+        random_x, random_y = generate_random_point(height, width)
+        nearest_index = find_nearest_node(random_x, random_y)
+        nearest_node_x = node_list[nearest_index].x
+        nearest_node_y = node_list[nearest_index].y
+
+        next_x, next_y, direct_connection, node_connection = evaluate_collision(random_x, random_y, nearest_node_x, nearest_node_y, image)
+        if node_connection:
+            new_node = Nodes(next_x, next_y)
+            new_node.parent_x = node_list[nearest_index].parent_x.copy()
+            new_node.parent_y = node_list[nearest_index].parent_y.copy()
+            new_node.parent_x.append(next_x)
+            new_node.parent_y.append(next_y)
+            new_node.cost = node_list[nearest_index].cost + step_size
+            node_list.append(new_node)
+
+            cv2.circle(image_display, (int(next_x), int(next_y)), 2, (0, 0, 255), thickness=3, lineType=8)
+            cv2.line(image_display, (int(next_x), int(next_y)), (int(nearest_node_x), int(nearest_node_y)), (0, 255, 0), thickness=1, lineType=8)
+
+            # Rewire
+            rewire(node_list, new_node, search_radius, image)
+
+            # Check direct connection to the endpoint
+            if not detect_collision(next_x, next_y, end_point[0], end_point[1], image):
+                path_found = True
+                cv2.line(image_display, (int(next_x), int(next_y)), (end_point[0], end_point[1]), (255, 0, 0), thickness=2, lineType=8)
+                final_node = Nodes(end_point[0], end_point[1])
+                final_node.parent_x = new_node.parent_x.copy()
+                final_node.parent_y = new_node.parent_y.copy()
+                final_node.parent_x.append(end_point[0])
+                final_node.parent_y.append(end_point[1])
+                node_list.append(final_node)
+
+                for j in range(len(final_node.parent_x) - 1):
+                    cv2.line(image_display, 
+                             (int(final_node.parent_x[j]), int(final_node.parent_y[j])),
+                             (int(final_node.parent_x[j + 1]), int(final_node.parent_y[j + 1])),
+                             (255, 0, 0), thickness=2, lineType=8)
+
+                cv2.imwrite("rrt_star.jpg", image_display)
+                break
+
+    return
+    
 def draw_circle(event,x,y,flags,param):
     global coordinates
     if event == cv2.EVENT_LBUTTONDBLCLK:
@@ -277,6 +269,6 @@ if __name__ == '__main__':
         end=(coordinates[2],coordinates[3])
 
     # run the RRT algorithm 
-    # RRT(img, img2, start, end, stepSize)
+    RRT(img, img2, start, end, stepSize)
     radius = stepSize * 5  # Define radius for rewiring
-    RRT_star(img, img2, start, end, stepSize, radius)
+    # RRT_star(img, img2, start, end, stepSize, radius)
