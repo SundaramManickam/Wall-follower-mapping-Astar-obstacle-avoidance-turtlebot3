@@ -473,7 +473,7 @@ class Task3(Node):
         # Publishers
         self.cmd_publisher = self.create_publisher(Twist, 'cmd_vel', 10)
         self.rate = self.create_rate(10)
-        self.mp = MapProcessor('sync_classroom_map')
+        self.mp = MapProcessor('map')
         kr = self.mp.rect_kernel(11,11)
         self.mp.inflate_map(kr,True)
         self.mp.get_graph_from_map()
@@ -774,13 +774,13 @@ class Task3(Node):
             contours, _ = cv2.findContours(check, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
             for contour in contours:
                 area = cv2.contourArea(contour)
-                if area > 450000: 
+                if area > 380000: 
                     self.get_logger().info("detected")
                     self._is_obstacle_detected = True
                     # self.stop()
                     self.move_ttbot(0.0,0.0)
                 else:  
-                    print("NOT")                      
+                    # print("NOT")                      
                     self._is_obstacle_detected = False
                 cv2.putText(check, str(area), (200, 1000), cv2.FONT_HERSHEY_SIMPLEX, 3, (255, 255, 255), 5 , cv2.LINE_AA)
                 # cv2.imshow("Mask", check)
@@ -792,21 +792,55 @@ class Task3(Node):
 
     def callback_lidar_data(self, laser_scan):
         self.header = laser_scan.header
-        if (min(laser_scan.ranges[260:270]+laser_scan.ranges[80:100]+laser_scan.ranges[340:360]+laser_scan.ranges[0:20])<0.2 and not self._is_obstacle_detected):
-            print(min(laser_scan.ranges[260:270]+laser_scan.ranges[80:100]+laser_scan.ranges[340:360]+laser_scan.ranges[0:20]))
-            print("lidar moving up")
-            self.move_ttbot(-0.4, 0.0)
-            time.sleep(0.25)
-            self.move_ttbot(0.0, 0.0)
-            # self._is_obstacle_detected = True
+        theta = np.arange(laser_scan.angle_min, laser_scan.angle_max, laser_scan.angle_increment)
+        r = np.array(laser_scan.ranges)
 
-        if (min(laser_scan.ranges[150:210])<0.20):
-            print("lidar moving down")
-            # self._is_obstacle_detected = False
-            self.move_ttbot(0.5, 0.0)
-            time.sleep(0.25)
-            self.move_ttbot(0.0, 0.0)
-            # self._is_obstacle_detected = True
+        if len(theta) != len(r):
+            if len(theta) < len(r):
+                r = r[:len(theta)]  # truncate r
+
+            else:
+                theta = theta[:len(r)]  # truncate theta
+
+
+        # convert points from polar coordinates to cartesian coordinates
+        indices_of_valid_r = [i for i in range(len(r)) if laser_scan.range_min <= r[i] < laser_scan.range_max]
+        r, theta = [r[i] for i in indices_of_valid_r], [theta[i] for i in indices_of_valid_r]
+        self.points = [Point(x=r[i] * np.cos(theta[i]), y=r[i] * np.sin(theta[i]), z=0.0)  # 2D lidar doesn't have Z
+                       for i in range(len(r))]
+            
+        self.reset_state()
+        self.detect_obstacles()
+        if(len(self._is_obstacle_detected_circles) and not self.plan_done):
+            for grp in self._is_obstacle_detected_circles:
+                print(grp.best_fit_circle.radius)
+                if(grp.best_fit_circle.radius > 0.20 and grp.best_fit_circle.radius < 0.25):
+                    x = grp.best_fit_circle.center.x
+                    y = grp.best_fit_circle.center.y
+                    print(str(x)+"   "+str(y))
+                    
+                    if(x<-0.2 and x>-0.7 and y<0.5 and y>-0.5):
+                        print("BEHINDDDDDDDDDDD")
+                        print(str(x)+"   "+str(y))
+                        # self.obstacles = True
+                        if(y<=0):
+                            self.move_ttbot(0.4,0.1)
+                            time.sleep(0.25)
+                            self.move_ttbot(0.0, 0.0)
+                            
+                        else:
+                            
+                            self.move_ttbot(0.2,-0.1)
+                            time.sleep(0.2)
+                            self.move_ttbot(0.0, 0.0)
+                            
+                    if(x>0 and x<0.7 and y<0.5 and y>-0.5):
+                        print("FRONTTTTTTTTTT")
+                        print(str(x)+"   "+str(y))
+                        self.move_ttbot(-0.2, 0.0)
+                        time.sleep(0.25)
+                        self.move_ttbot(0.0, 0.0)
+
     
     def __real_world_to_grid(self, data):        
         
@@ -844,10 +878,14 @@ class Task3(Node):
     def __goal_pose_cbk(self, data):
         self.goal_pose = Pose()
         self.goal_pose= data.pose
-        self.plan_done = False
         if(self.ttbot_data_pose is not None):
             path,self.node_path = self.a_star_path_planner(self.ttbot_data_pose, self.goal_pose)
-            self.path_pub.publish(path)
+            # Apply scaling and offset to each pose in the Path message
+            for pose in self.path.poses:
+                pose.pose.position.x = pose.pose.position.x  
+                pose.pose.position.y = pose.pose.position.y  -0.1
+
+            self.path_pub.publish(self.path)
         else:
             print("try again no current pose")
 
@@ -923,7 +961,7 @@ class Task3(Node):
     
     def linear_pid(self,error):
         kp = 7
-        kd = 3
+        kd = 4
         ki = 0.001
         dt = 0.1
         self.lin_int_error += error * dt
@@ -937,8 +975,8 @@ class Task3(Node):
     
     def angular_pid(self,error):
         kp = 7
-        kd = 12
-        ki = 0.01
+        kd = 15
+        ki = 0.001
         dt = 0.1
         self.ang_int_error += error * dt
         derivative = (error - self.ang_prev_error) / dt
@@ -951,15 +989,18 @@ class Task3(Node):
         dx = target.position.x - current.position.x
         dy = target.position.y - current.position.y
         distance = np.sqrt(dx ** 2 + dy ** 2)
-        print("goal_reached function" + str(distance))
+        # print("goal_reached function" + str(distance))
         return distance < off
     
     def move_ttbot(self, speed, heading):
 
         cmd_velocity = Twist()
-        
-        cmd_velocity.linear.x = float(speed)
-        cmd_velocity.angular.z = float(heading)
+        if(self._is_obstacle_detected or (speed ==0 and heading==0)):
+            cmd_velocity.linear.x = float(0)
+            cmd_velocity.angular.z = float(0)
+        else:
+            cmd_velocity.linear.x = float(speed)
+            cmd_velocity.angular.z = float(heading)
         
 
         self.cmd_publisher.publish(cmd_velocity)
@@ -972,41 +1013,32 @@ class Task3(Node):
         return angle
 
     def get_path_idx(self):
-        min_distance = float('inf')
-        angle_threshold = 0.01
-        potential_i = None
-        current_angle = self.get_yaw(self.ttbot_data_pose)  
-        for i in range(self.last_idx, len(self.path.poses)):
-            waypoint = self.path.poses[i]
-            temp_x = ((waypoint.pose.position.x)) 
-            temp_y = ((waypoint.pose.position.y))
-            distance = np.sqrt((self.ttbot_data_pose.position.x - temp_x) ** 2 + (self.ttbot_data_pose.position.y - temp_y) ** 2)
-            target_angle = math.atan2(temp_y - self.ttbot_data_pose.position.y  , temp_x - self.ttbot_data_pose.position.x)
-            angle = abs(target_angle - current_angle)
-            if angle > angle_threshold and distance < min_distance:
-                min_distance = distance
-                potential_i = i
-        if potential_i is not None: 
-            return potential_i
-        
-        return (len(self.path.poses) - 1)
+        if(self.last_idx!=len(self.node_path)-1):
+            return self.last_idx+1
+        else:            
+            return len(self.node_path)-1
 
-    def path_navigator(self,current_goal):
+    def path_navigator(self,current_goal,prev_goal):
         rclpy.spin_once(self, timeout_sec=0.1)
+        # prev_goal_x = (prev_goal.pose.position.x) if (self.last_idx>0) else 0
+        # prev_goal_y = (prev_goal.pose.position.y) if (self.last_idx>0) else 0
         self.distance_to_goal = math.sqrt((current_goal.pose.position.x - self.ttbot_data_pose.position.x) ** 2 + (current_goal.pose.position.y - self.ttbot_data_pose.position.y) ** 2)
         target_angle = math.atan2(current_goal.pose.position.y - self.ttbot_data_pose.position.y, current_goal.pose.position.x - self.ttbot_data_pose.position.x)
+        # target_angle = math.atan2(current_goal.pose.position.y - prev_goal_y, current_goal.pose.position.x - prev_goal_x)
         current_angle = self.get_yaw(self.ttbot_data_pose)  
+        target_angle = self.normalize_angle(target_angle)
         yaw_error = self.normalize_angle(target_angle - current_angle)
-        lin_err = 0.1
-        ang_err = 0.20
+        lin_err = 0.45
+        ang_err = 0.13
         self.is_goal_reached = False
         if(abs(yaw_error) > ang_err):
-            print("yaw_error"+str(yaw_error))
-            self.speed = 0.1*self.distance_to_goal
+            # print("yaw_error"+str(yaw_error))
+            self.speed = 0.07*self.distance_to_goal
             self.heading = self.angular_pid(abs(yaw_error)) if yaw_error > 0 else -self.angular_pid(abs(yaw_error))
         elif ((self.distance_to_goal > lin_err)): 
+            # print("lin"+str(self.distance_to_goal))
             self.speed = self.linear_pid(self.distance_to_goal)
-            self.heading = 0.1*yaw_error
+            self.heading = 0.07*yaw_error
         else: 
             self.is_goal_reached = True
             self.speed = 0
@@ -1028,27 +1060,20 @@ class Task3(Node):
             
             self.ttbot_pose_tuple = tuple(map(int, starting.split(',')))
             if(self.node_path is not None):
-                while (not self.goal_reached(self.ttbot_data_pose,self.goal_pose)):
+                while not self.goal_reached(self.ttbot_data_pose,self.goal_pose):
                     rclpy.spin_once(self, timeout_sec=0.1)
-                    if(not self._is_obstacle_detected):
-                        self.idx = self.get_path_idx()
-                        print("waypoint no:" + str(self.idx))
-                        current_goal = self.path.poses[self.idx]
-                        # print(current_goal)
-                        while(not self.is_goal_reached):
-                            # print("runing")
-                            # if():
-                            #     self.is_goal_reached = True
-                            #     # continue
-                            rclpy.spin_once(self, timeout_sec=0.1)
-                            if(self._is_obstacle_detected):
-                                self.is_goal_reached = True
-                                print("skipping")
-                                continue
-                            self.path_navigator(current_goal)
-                            self.move_ttbot(self.speed,self.heading)
-                        self.last_idx = self.idx+1
-                        self.is_goal_reached = False
+                    self.idx = self.get_path_idx()
+                    print("waypoint no:" + str(self.idx))
+                    current_goal = self.path.poses[self.idx]
+                    # print(self.idx)
+                    while(not self.is_goal_reached):
+                        rclpy.spin_once(self, timeout_sec=0.1)
+                        self.path_navigator(current_goal,self.path.poses[self.last_idx])
+                        # print(self.speed)
+                        # print(self.heading)
+                        self.move_ttbot(self.speed,self.heading)
+                    self.last_idx = self.idx
+                    self.is_goal_reached = False
                 self.plan_done = True  
                 self.get_logger().info("Goal reached, stopping robot")
                 self.move_ttbot(0.0, 0.0)

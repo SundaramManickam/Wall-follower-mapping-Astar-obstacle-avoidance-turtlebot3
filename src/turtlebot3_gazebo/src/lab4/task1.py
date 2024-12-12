@@ -252,7 +252,7 @@ class Task1(Node):
                 self.ang_side_prev_error = 0
                 self.lin_int_error = 0
                 self.lin_prev_error = 0
-            elif ((right_avg+left_avg)/2 > self.wall_stop_distance+0.5):  # Wall opening detected
+            elif (self.scan_data[270] >= self.wall_stop_distance+0.5):  # Wall opening detected
                 self.get_logger().warn("OPENING")
                 avg = (right_avg+left_avg)/2
                 self.get_logger().info(f"right {avg:.2f}")

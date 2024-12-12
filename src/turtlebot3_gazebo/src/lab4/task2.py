@@ -375,7 +375,12 @@ class Task2(Node):
         self.goal_pose= data.pose
         if(self.ttbot_data_pose is not None):
             path,self.node_path = self.a_star_path_planner(self.ttbot_data_pose, self.goal_pose)
-            self.path_pub.publish(path)
+            # Apply scaling and offset to each pose in the Path message
+            for pose in self.path.poses:
+                pose.pose.position.x = pose.pose.position.x  
+                pose.pose.position.y = pose.pose.position.y  -0.06
+
+            self.path_pub.publish(self.path)
         else:
             print("try again no current pose")
 
@@ -394,6 +399,11 @@ class Task2(Node):
         @param  end_pose      PoseStamped object containing the end of the path to be created.
         @return path          Path object containing the sequence of waypoints of the created path.
         """
+        self.path = Path()
+        self.path.header = Header()
+        self.path.header.frame_id = "map" 
+        self.last_idx = 0
+        self.idx = 1
         ending = self.__real_world_to_grid(end_pose) #ttbot_pose in string
         starting = self.__real_world_to_grid(start_pose) #ttbot_pose in string
         self.ttbot_pose_tuple = tuple(map(int, starting.split(',')))
@@ -454,7 +464,7 @@ class Task2(Node):
         ang_vel = min(max(ang_vel, 0.0), 0.2)
         return ang_vel
     
-    def goal_reached(self, current, target, off=0.20):
+    def goal_reached(self, current, target, off=0.30):
         dx = target.position.x - current.position.x
         dy = target.position.y - current.position.y
         distance = np.sqrt(dx ** 2 + dy ** 2)
@@ -476,33 +486,23 @@ class Task2(Node):
         return angle
 
     def get_path_idx(self):
-        min_distance = float('inf')
-        angle_threshold = 0.01
-        potential_i = None
-        current_angle = self.get_yaw(self.ttbot_data_pose)  
-        for i in range(self.last_idx, len(self.path.poses)):
-            waypoint = self.path.poses[i]
-            temp_x = ((waypoint.pose.position.x)) 
-            temp_y = ((waypoint.pose.position.y))
-            distance = np.sqrt((self.ttbot_data_pose.position.x - temp_x) ** 2 + (self.ttbot_data_pose.position.y - temp_y) ** 2)
-            target_angle = math.atan2(temp_y - self.ttbot_data_pose.position.y  , temp_x - self.ttbot_data_pose.position.x)
-            angle = abs(target_angle - current_angle)
-            if angle > angle_threshold and distance < min_distance:
-                min_distance = distance
-                potential_i = i
-        if potential_i is not None: 
-            return potential_i
-        
-        return (len(self.path.poses) - 1)
+        if(self.last_idx!=len(self.node_path)-1):
+            return self.last_idx+1
+        else:
+            # print("fdsdsds")
+            # print(self.last_idx)
+            # print(len(self.node_path)-1)            
+            return len(self.node_path)-1 
 
-    def path_navigator(self,current_goal):
+    def path_navigator(self,current_goal,prev_goal):
         rclpy.spin_once(self, timeout_sec=0.1)
         self.distance_to_goal = math.sqrt((current_goal.pose.position.x - self.ttbot_data_pose.position.x) ** 2 + (current_goal.pose.position.y - self.ttbot_data_pose.position.y) ** 2)
         target_angle = math.atan2(current_goal.pose.position.y - self.ttbot_data_pose.position.y, current_goal.pose.position.x - self.ttbot_data_pose.position.x)
         current_angle = self.get_yaw(self.ttbot_data_pose)  
+        target_angle = self.normalize_angle(target_angle)
         yaw_error = self.normalize_angle(target_angle - current_angle)
         lin_err = 0.33
-        ang_err = 0.2
+        ang_err = 0.12
         self.is_goal_reached = False
         if(abs(yaw_error) > ang_err):
             
@@ -535,19 +535,15 @@ class Task2(Node):
                     self.idx = self.get_path_idx()
                     print("waypoint no:" + str(self.idx))
                     current_goal = self.path.poses[self.idx]
-                    # print(current_goal)
                     while(not self.is_goal_reached):
                         rclpy.spin_once(self, timeout_sec=0.1)
-                        self.path_navigator(current_goal)
-                        # print(self.speed)
-                        # print(self.heading)
+                        self.path_navigator(current_goal,self.path.poses[self.last_idx])
                         self.move_ttbot(self.speed,self.heading)
-                    self.last_idx = self.idx+1
+                    self.last_idx = self.idx
                     self.is_goal_reached = False
                     
                 self.get_logger().info("Goal reached, stopping robot")
                 self.move_ttbot(0.0, 0.0)
-                self.goal_pose = None
 
 def main(args=None):
     
