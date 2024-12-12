@@ -1,11 +1,4 @@
-"""
 
-Path planning with Rapidly-Exploring Random Trees (RRT)
-
-author: Aakash(@nimrobotics)
-web: nimrobotics.github.io
-
-"""
 
 import cv2
 import numpy as np
@@ -33,8 +26,6 @@ def rewire(node_list, new_node, radius,img):
                 node_list[i].cost = new_cost
                 node_list[i].parent_x = new_node.parent_x.copy()
                 node_list[i].parent_y = new_node.parent_y.copy()
-                # node_list[i].parent_x.append(node_list[i].x)
-                # node_list[i].parent_y.append(node_list[i].y)
 
 def collision(x1, y1, x2, y2, img):
     color = []
@@ -286,6 +277,6 @@ if __name__ == '__main__':
         end=(coordinates[2],coordinates[3])
 
     # run the RRT algorithm 
-    RRT(img, img2, start, end, stepSize)
+    # RRT(img, img2, start, end, stepSize)
     radius = stepSize * 5  # Define radius for rewiring
-    # RRT_star(img, img2, start, end, stepSize, radius)
+    RRT_star(img, img2, start, end, stepSize, radius)
