@@ -258,7 +258,7 @@ class AStar():
     def solve(self, sn, en):
         # Set the start node distance to 0
         self.dist[sn.name] = 0
-        heapq.heappush(self.sets, (self.__get_f_score(sn.name), sn.name))  # Use node name instead of the object
+        heapq.heappush(self.sets, (self.__get_f_score(sn.name), sn.name)) 
         # Process until the queue is empty
         while self.sets:
             _, u = heapq.heappop(self.sets)

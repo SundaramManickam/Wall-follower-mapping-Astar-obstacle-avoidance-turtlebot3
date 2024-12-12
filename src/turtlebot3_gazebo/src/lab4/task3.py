@@ -10,16 +10,16 @@ import itertools
 from sklearn.linear_model import LinearRegression
 from scipy import optimize
 from scipy.spatial import ConvexHull
-from enum import Enum
 from sensor_msgs.msg import LaserScan, Image
 from visualization_msgs.msg import MarkerArray, Marker
 import warnings
 import cv2
+from tf_transformations import euler_from_quaternion
 from cv_bridge import CvBridge, CvBridgeError
 import pandas as pd
 import math
 import yaml
-from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, Pose, Twist, Point, TransformStamped
+from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, Pose, Twist, Point
 import PIL.Image
 from PIL import  ImageOps
 import matplotlib.pyplot as plt
@@ -268,17 +268,15 @@ class AStar():
         return self.dist[node] + self.h[node]
 
     def solve(self, sn, en):
-        # Set the start node distance to 0
         self.dist[sn.name] = 0
-        heapq.heappush(self.sets, (self.__get_f_score(sn.name), sn.name))  # Use node name instead of the object
+        heapq.heappush(self.sets, (self.__get_f_score(sn.name), sn.name)) 
         # Process until the queue is empty
         while self.sets:
             _, u = heapq.heappop(self.sets)
             # Check if the end node is reached
             if u == en.name:
                 break
-            current_node = self.in_tree.g[u]  # Get the actual node object
-            # Iterate through each child of the current node
+            current_node = self.in_tree.g[u]  
             for i in range(len(current_node.children)):
                 c = current_node.children[i]
                 w = current_node.weight[i]
@@ -775,20 +773,14 @@ class Task3(Node):
             for contour in contours:
                 area = cv2.contourArea(contour)
                 if area > 380000: 
-                    self.get_logger().info("detected")
                     self._is_obstacle_detected = True
-                    # self.stop()
                     self.move_ttbot(0.0,0.0)
+                    self.get_logger().info("detected")
+                    
                 else:  
-                    # print("NOT")                      
                     self._is_obstacle_detected = False
-                cv2.putText(check, str(area), (200, 1000), cv2.FONT_HERSHEY_SIMPLEX, 3, (255, 255, 255), 5 , cv2.LINE_AA)
-                # cv2.imshow("Mask", check)
-                self.img_pub.publish(self.bridge.cv2_to_imgmsg(check))
-
-                
         except CvBridgeError as e:
-            self.get_logger().error(f"Could not convert image: {e}")
+            self.get_logger().error(f"error {e}")
 
     def callback_lidar_data(self, laser_scan):
         self.header = laser_scan.header
@@ -816,9 +808,7 @@ class Task3(Node):
                 print(grp.best_fit_circle.radius)
                 if(grp.best_fit_circle.radius > 0.20 and grp.best_fit_circle.radius < 0.25):
                     x = grp.best_fit_circle.center.x
-                    y = grp.best_fit_circle.center.y
-                    print(str(x)+"   "+str(y))
-                    
+                    y = grp.best_fit_circle.center.y                    
                     if(x<-0.2 and x>-0.7 and y<0.5 and y>-0.5):
                         print("BEHINDDDDDDDDDDD")
                         print(str(x)+"   "+str(y))
@@ -896,7 +886,6 @@ class Task3(Node):
         msg.position.y = float(math.ceil(data.pose.pose.position.y))
         self.ttbot_data_pose = data.pose.pose
         
-    
 
     def a_star_path_planner(self, start_pose, end_pose):
         """! A Start path planner.
@@ -936,27 +925,11 @@ class Task3(Node):
             self.get_logger().info(
                 'No new plan'   )
             node_path = 0
-    
-    def euler_from_quaternion(self,quaternion):
-        """Convert quaternion to euler roll, pitch, yaw."""
-        x, y, z, w = quaternion.x, quaternion.y, quaternion.z, quaternion.w
-        sinr_cosp = 2 * (w * x + y * z)
-        cosr_cosp = 1 - 2 * (x * x + y * y)
-        roll = np.arctan2(sinr_cosp, cosr_cosp)
-
-        sinp = 2 * (w * y - z * x)
-        pitch = np.arcsin(sinp)
-
-        siny_cosp = 2 * (w * z + x * y)
-        cosy_cosp = 1 - 2 * (y * y + z * z)
-        yaw = np.arctan2(siny_cosp, cosy_cosp)
-
-        return roll, pitch, yaw
 
     def get_yaw(self, pose):
         orientation = pose.orientation
         quaternion = (orientation.x, orientation.y, orientation.z, orientation.w)
-        roll, pitch, yaw = self.euler_from_quaternion(orientation)
+        roll, pitch, yaw = euler_from_quaternion(quaternion)
         return yaw  
     
     def linear_pid(self,error):
@@ -970,7 +943,7 @@ class Task3(Node):
         linear_velocity = (kp * error) + (ki * self.lin_int_error) + (kd * derivative)
         if math.isinf(linear_velocity):
             linear_velocity = 0.0
-        linear_velocity = min(max(linear_velocity, 0.0), 0.4)  # Clamp velocity to [0.0, 0.15]
+        linear_velocity = min(max(linear_velocity, 0.0), 0.4) 
         return linear_velocity
     
     def angular_pid(self,error):
@@ -1020,11 +993,8 @@ class Task3(Node):
 
     def path_navigator(self,current_goal,prev_goal):
         rclpy.spin_once(self, timeout_sec=0.1)
-        # prev_goal_x = (prev_goal.pose.position.x) if (self.last_idx>0) else 0
-        # prev_goal_y = (prev_goal.pose.position.y) if (self.last_idx>0) else 0
         self.distance_to_goal = math.sqrt((current_goal.pose.position.x - self.ttbot_data_pose.position.x) ** 2 + (current_goal.pose.position.y - self.ttbot_data_pose.position.y) ** 2)
         target_angle = math.atan2(current_goal.pose.position.y - self.ttbot_data_pose.position.y, current_goal.pose.position.x - self.ttbot_data_pose.position.x)
-        # target_angle = math.atan2(current_goal.pose.position.y - prev_goal_y, current_goal.pose.position.x - prev_goal_x)
         current_angle = self.get_yaw(self.ttbot_data_pose)  
         target_angle = self.normalize_angle(target_angle)
         yaw_error = self.normalize_angle(target_angle - current_angle)
