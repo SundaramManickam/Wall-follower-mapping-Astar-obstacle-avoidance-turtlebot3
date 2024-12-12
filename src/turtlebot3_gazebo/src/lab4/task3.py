@@ -809,25 +809,25 @@ class Task3(Node):
                 if(grp.best_fit_circle.radius > 0.20 and grp.best_fit_circle.radius < 0.25):
                     x = grp.best_fit_circle.center.x
                     y = grp.best_fit_circle.center.y                    
-                    if(x<-0.2 and x>-0.7 and y<0.5 and y>-0.5):
+                    if(x<-0.1 and x>-0.5 and y<0.7 and y>-0.7):
                         print("BEHINDDDDDDDDDDD")
-                        print(str(x)+"   "+str(y))
+                        # print(str(x)+"   "+str(y))
                         # self.obstacles = True
                         if(y<=0):
-                            self.move_ttbot(0.4,0.1)
+                            self.move_ttbot(0.2,0.0)
                             time.sleep(0.25)
                             self.move_ttbot(0.0, 0.0)
                             
                         else:
                             
-                            self.move_ttbot(0.2,-0.1)
+                            self.move_ttbot(0.2,0.0)
                             time.sleep(0.2)
                             self.move_ttbot(0.0, 0.0)
                             
                     if(x>0 and x<0.7 and y<0.5 and y>-0.5):
                         print("FRONTTTTTTTTTT")
                         print(str(x)+"   "+str(y))
-                        self.move_ttbot(-0.2, 0.0)
+                        self.move_ttbot(-0.3, 0.0)
                         time.sleep(0.25)
                         self.move_ttbot(0.0, 0.0)
 
