@@ -1,3 +1,9 @@
+This was a final project for the course ME597 Autonomous System. 
+This code has three tasks
+1. Task1 - Autonomously map any surrounding - This was achieved by using a wall following method from the LIDAR sensor along with PID tuning to make sure to always maintain distance and control velocity.
+2. Task2 - A star global path planner from Point A to Point B
+3. Task3 - A static obstacle avoidance method - The detection part was achieved using two methods, 1. Lidar to detect circle of particular size (size of trash can which is obstacle) and 2. using computer vision to detect thrash can's colour. The avoidance is done by eitehr pausing at position or speeding straight through if its already in line of movement of trash can.   
+
 # ME597 sim_ws
 ## Instructions:
 1. Simply save this workspace e.g., 
