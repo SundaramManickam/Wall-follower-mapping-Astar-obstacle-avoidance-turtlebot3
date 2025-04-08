@@ -9,7 +9,9 @@ This code has three tasks
 1. Simply save this workspace e.g., 
     ```
     cd ~/ros2 # cd into the dir you want to keep this workspace in
-    git clone https://github.com/naslab-projects/sim_ws.git
+    mkdir src
+    cd src
+    git clone https://github.com/SundaramManickam/Wall-follower-mapping-Astar-obstacle-avoidance-turtlebot3.git
     ```
 
 2. In a new terminal build the sim_ws workspace: 
@@ -38,3 +40,13 @@ This code has three tasks
     cd sim_ws
     source install/local_setup.bash
     ```
+
+## Demonstration
+### Task1
+![Task 1](videos/task_1.gif)
+### Task2
+![Task 2](videos/task_2.gif)
+### Task3
+![Task 3](task3.gif)
+### Bonus Task 
+![Bonus](videos/bonus.gif)
