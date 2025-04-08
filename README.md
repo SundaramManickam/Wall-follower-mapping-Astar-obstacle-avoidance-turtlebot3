@@ -47,6 +47,6 @@ This code has three tasks
 ### Task2
 ![Task 2](videos/task_2.gif)
 ### Task3
-![Task 3](task3.gif)
+![Task 3](videos/task3.gif)
 ### Bonus Task 
 ![Bonus](videos/bonus.gif)
